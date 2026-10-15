@@ -1,6 +1,6 @@
 {
-  "name": "Libreta de Fiados - Despensa Familiar",
-  "short_name": "Fiados",
+  "name": "Despensa Snoopy - Libreta de Fiados",
+  "short_name": "Despensa Snoopy",
   "description": "Sistema de gestión de cuentas corrientes y fiados para despensas y comercios familiares",
   "start_url": "/",
   "display": "standalone",

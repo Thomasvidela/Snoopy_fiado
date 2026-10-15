@@ -134,17 +134,16 @@ New-NetFirewallRule -DisplayName "Libreta Fiados" -Direction Inbound -LocalPort 
 
 Si los dueños de la despensa quieren consultar saldos o anotar fiados cuando están fuera del local (con datos móviles 4G/5G):
 
-1. El archivo `docker-compose.yml` ya incluye el servicio opcional `tunnel` (Cloudflare Tunnel).
-2. Cree un túnel gratuito en [Cloudflare Zero Trust](https://one.dash.cloudflare.com/) apuntando a `http://app:8000`.
-3. Copie el token del túnel en su `.env`:
-   ```env
-   CLOUDFLARE_TUNNEL_TOKEN=eyJhIjoi...
+1. **Dominio Oficial:** El sistema está configurado y vinculado a:
+   ```text
+   https://despensasnoopy.app
    ```
-4. Descomente el servicio `tunnel` en `docker-compose.yml` y ejecute:
+2. El contenedor `fiados_tunnel` (Cloudflare Tunnel) ya viene integrado en `docker-compose.yml`.
+3. Al tener configurada la variable `CLOUDFLARE_TUNNEL_TOKEN` en su archivo `.env`, se levanta automáticamente con:
    ```bash
    docker compose up -d
    ```
-5. Podrá ingresar desde cualquier celular en cualquier parte del mundo con su dominio seguro HTTPS (por ejemplo `https://fiados.mitienda.com`) **sin abrir puertos en el módem**.
+4. Podrá ingresar desde cualquier celular en cualquier parte del mundo con candado seguro HTTPS **sin necesidad de abrir puertos en el módem**.
 
 ---
 

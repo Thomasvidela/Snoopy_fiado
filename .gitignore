@@ -26,7 +26,6 @@ yarn-debug.log*
 yarn-error.log*
 
 # Environment & Secrets
-.env
 .env.local
 
 # Backups

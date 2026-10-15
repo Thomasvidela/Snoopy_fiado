@@ -23,7 +23,8 @@ def listar_clientes(
     solo_activos: Optional[bool] = Query(None, description="Filtrar por estado activo (True=activos, False=inactivos, None=todos)"),
     limite: int = Query(200, ge=1, le=500),
     offset: int = Query(0, ge=0),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    operador: Usuario = Depends(get_current_user)
 ):
     """
     Lista clientes ordenados por última actividad descendente.
@@ -70,7 +71,11 @@ def crear_cliente(
 
 
 @router.get("/{cliente_id}", response_model=ClienteOut)
-def obtener_cliente(cliente_id: int, db: Session = Depends(get_db)):
+def obtener_cliente(
+    cliente_id: int,
+    db: Session = Depends(get_db),
+    operador: Usuario = Depends(get_current_user)
+):
     """Obtiene los detalles y saldo actual de un cliente."""
     cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
     if not cliente:
@@ -133,7 +138,8 @@ def toggle_cliente_activo(
 def obtener_resumen_mensual(
     cliente_id: int,
     mes: Optional[str] = Query(None, description="Período en formato YYYY-MM (por defecto el mes actual)"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    operador: Usuario = Depends(get_current_user)
 ):
     """
     Obtiene el estado de cuenta mensual con saldo anterior, movimientos, totales y
@@ -150,7 +156,8 @@ def obtener_resumen_mensual(
 def exportar_movimientos_excel(
     cliente_id: int,
     mes: Optional[str] = Query(None, description="Período YYYY-MM opcional (por ejemplo '2026-10')"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    operador: Usuario = Depends(get_current_user)
 ):
     """
     Genera y descarga un documento Excel (.xlsx) profesional con el historial de movimientos

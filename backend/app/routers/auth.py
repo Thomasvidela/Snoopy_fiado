@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import secrets
 import threading
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -114,7 +115,7 @@ def verificar_clave_local(payload: ClaveLocalRequest, request: Request):
             detail=f"Demasiados intentos incorrectos de clave del local. Intente nuevamente en {remaining} minuto(s)."
         )
 
-    if payload.clave.strip() != settings.STORE_ACCESS_KEY:
+    if not secrets.compare_digest(payload.clave.strip(), settings.STORE_ACCESS_KEY):
         login_limiter.record_failure(ip_key)
         intentos = login_limiter.get_remaining_attempts(ip_key)
         if intentos > 0:
@@ -137,8 +138,8 @@ def listar_operadores(
     db: Session = Depends(get_db)
 ):
     """Lista los operadores. Requiere que el dispositivo envíe la clave del comercio autorizada."""
-    store_key = request.headers.get("x-store-key")
-    if settings.STORE_ACCESS_KEY and store_key != settings.STORE_ACCESS_KEY:
+    store_key = request.headers.get("x-store-key", "")
+    if settings.STORE_ACCESS_KEY and not secrets.compare_digest(store_key, settings.STORE_ACCESS_KEY):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Dispositivo no autorizado. Se requiere la clave de acceso del comercio."
@@ -286,12 +287,20 @@ def eliminar_operador(
 @router.post("/login", response_model=TokenResponse)
 def login_con_pin(payload: LoginPinRequest, request: Request, db: Session = Depends(get_db)):
     """Autentica a un operador mediante su PIN numérico con protección anti fuerza bruta y bloqueo temporal."""
+    # Verificar clave de acceso del comercio
+    store_key = request.headers.get("x-store-key", "")
+    if settings.STORE_ACCESS_KEY and not secrets.compare_digest(store_key, settings.STORE_ACCESS_KEY):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Dispositivo no autorizado. Se requiere la clave de acceso del comercio."
+        )
+
     client_ip = get_client_ip(request)
-    user_key = f"user_{payload.usuario_id}"
+    user_ip_key = f"user_{payload.usuario_id}_ip_{client_ip}"
     ip_key = f"ip_{client_ip}"
 
-    # 1. Comprobar si el usuario o la IP están bloqueados por intentos fallidos
-    rem_user = login_limiter.get_lockout_remaining(user_key)
+    # 1. Comprobar si el usuario desde esta IP o la IP general están bloqueados por intentos fallidos
+    rem_user = login_limiter.get_lockout_remaining(user_ip_key)
     rem_ip = login_limiter.get_lockout_remaining(ip_key)
     remaining_min = rem_user or rem_ip
     if remaining_min is not None:
@@ -315,10 +324,10 @@ def login_con_pin(payload: LoginPinRequest, request: Request, db: Session = Depe
         )
 
     if not verify_pin(payload.pin, usuario.pin_hash):
-        login_limiter.record_failure(user_key)
+        login_limiter.record_failure(user_ip_key)
         login_limiter.record_failure(ip_key)
         intentos_restantes = min(
-            login_limiter.get_remaining_attempts(user_key),
+            login_limiter.get_remaining_attempts(user_ip_key),
             login_limiter.get_remaining_attempts(ip_key)
         )
         if intentos_restantes > 0:
@@ -331,7 +340,7 @@ def login_con_pin(payload: LoginPinRequest, request: Request, db: Session = Depe
         )
 
     # Inicio de sesión exitoso: resetear contadores de fallos
-    login_limiter.record_success(user_key)
+    login_limiter.record_success(user_ip_key)
     login_limiter.record_success(ip_key)
 
     access_token = create_access_token(data={"sub": str(usuario.id), "nombre": usuario.nombre})

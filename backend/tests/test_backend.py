@@ -64,25 +64,32 @@ def test_auth_operadores_y_login(client):
     assert admin["nombre"] == "Administrador"
     assert admin["es_admin"] is True
 
-    # 4. Login con PIN incorrecto
-    resp_fail = client.post("/api/auth/login", json={"usuario_id": admin["id"], "pin": "9999"})
+    # 4. Login sin clave del local debe fallar (401)
+    resp_login_sin_clave = client.post("/api/auth/login", json={"usuario_id": admin["id"], "pin": "1111"})
+    assert resp_login_sin_clave.status_code == 401
+    assert "Dispositivo no autorizado" in resp_login_sin_clave.json()["detail"]
+
+    store_headers = {"x-store-key": "Despensa.Snoopy1980"}
+
+    # 5. Login con PIN incorrecto
+    resp_fail = client.post("/api/auth/login", json={"usuario_id": admin["id"], "pin": "9999"}, headers=store_headers)
     assert resp_fail.status_code == 401
 
-    # 3. Login con PIN correcto (1111)
-    resp_ok = client.post("/api/auth/login", json={"usuario_id": admin["id"], "pin": "1111"})
+    # 6. Login con PIN correcto (1111)
+    resp_ok = client.post("/api/auth/login", json={"usuario_id": admin["id"], "pin": "1111"}, headers=store_headers)
     assert resp_ok.status_code == 200
     token_data = resp_ok.json()
     assert "access_token" in token_data
     token = token_data["access_token"]
-    headers = {"Authorization": f"Bearer {token}"}
+    headers = {"Authorization": f"Bearer {token}", "x-store-key": "Despensa.Snoopy1980"}
 
-    # 4. Verificar endpoint /me
+    # 7. Verificar endpoint /me
     resp_me = client.get("/api/auth/me", headers=headers)
     assert resp_me.status_code == 200
     assert resp_me.json()["nombre"] == "Administrador"
     assert resp_me.json()["es_admin"] is True
 
-    # 5. Crear un nuevo operador
+    # 8. Crear un nuevo operador
     nuevo_op_payload = {"nombre": "Cajero Tarde", "pin": "2222", "es_admin": False}
     resp_create = client.post("/api/auth/operadores", json=nuevo_op_payload, headers=headers)
     assert resp_create.status_code == 201
@@ -90,26 +97,38 @@ def test_auth_operadores_y_login(client):
     assert cajero["nombre"] == "Cajero Tarde"
     assert cajero["es_admin"] is False
 
-    # 6. Login con nuevo operador
-    resp_login_cajero = client.post("/api/auth/login", json={"usuario_id": cajero["id"], "pin": "2222"})
+    # 9. Login con nuevo operador
+    resp_login_cajero = client.post(
+        "/api/auth/login",
+        json={"usuario_id": cajero["id"], "pin": "2222"},
+        headers=store_headers
+    )
     assert resp_login_cajero.status_code == 200
 
-    # 7. No se puede eliminar a uno mismo
+    # 10. No se puede eliminar a uno mismo
     resp_del_self = client.delete(f"/api/auth/operadores/{admin['id']}", headers=headers)
     assert resp_del_self.status_code == 400
 
-    # 8. Eliminar el operador recién creado (sin movimientos -> eliminación física)
+    # 11. Eliminar el operador recién creado (sin movimientos -> eliminación física)
     resp_del_cajero = client.delete(f"/api/auth/operadores/{cajero['id']}", headers=headers)
     assert resp_del_cajero.status_code == 200
     assert resp_del_cajero.json()["eliminado_fisicamente"] is True
 
 
 def test_flujo_completo_ledger_y_anulacion(client):
+    # Probar que acceder a clientes sin login devuelve 401 Unauthorized
+    resp_anon_clientes = client.get("/api/clientes")
+    assert resp_anon_clientes.status_code == 401
+
     # Login como Administrador (PIN 1111)
     operadores = client.get("/api/auth/operadores", headers={"x-store-key": "Despensa.Snoopy1980"}).json()
     admin = next(o for o in operadores if o["nombre"] == "Administrador")
-    token = client.post("/api/auth/login", json={"usuario_id": admin["id"], "pin": "1111"}).json()["access_token"]
-    headers = {"Authorization": f"Bearer {token}"}
+    token = client.post(
+        "/api/auth/login",
+        json={"usuario_id": admin["id"], "pin": "1111"},
+        headers={"x-store-key": "Despensa.Snoopy1980"}
+    ).json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}", "x-store-key": "Despensa.Snoopy1980"}
 
     # 1. Crear cliente con saldo inicial migrado de papel ($10.000,00)
     cliente_payload = {
@@ -127,7 +146,7 @@ def test_flujo_completo_ledger_y_anulacion(client):
     assert cliente["activo"] is True
 
     # Verificar que se creó el movimiento inicial
-    resp_movs = client.get(f"/api/clientes/{cliente_id}/movimientos")
+    resp_movs = client.get(f"/api/clientes/{cliente_id}/movimientos", headers=headers)
     assert resp_movs.status_code == 200
     movs = resp_movs.json()
     assert len(movs) == 1
@@ -156,7 +175,7 @@ def test_flujo_completo_ledger_y_anulacion(client):
     assert Decimal(str(mov_pago["saldo_resultante"])) == Decimal("7500.50")
 
     # Verificar saldo actual del cliente
-    cli_actual = client.get(f"/api/clientes/{cliente_id}").json()
+    cli_actual = client.get(f"/api/clientes/{cliente_id}", headers=headers).json()
     assert Decimal(str(cli_actual["saldo_actual"])) == Decimal("7500.50")
 
     # 4. Anular el cargo erróneo de $2.500,50
@@ -170,7 +189,7 @@ def test_flujo_completo_ledger_y_anulacion(client):
     assert Decimal(str(contra_asiento["saldo_resultante"])) == Decimal("5000.00")
 
     # Verificar que el original ahora está marcado como anulado
-    movs_actualizados = client.get(f"/api/clientes/{cliente_id}/movimientos").json()
+    movs_actualizados = client.get(f"/api/clientes/{cliente_id}/movimientos", headers=headers).json()
     cargo_original = next(m for m in movs_actualizados if m["id"] == cargo_id)
     assert cargo_original["anulado"] is True
 
@@ -229,7 +248,7 @@ def test_flujo_completo_ledger_y_anulacion(client):
     assert updated_cliente["telefono"].startswith("+54")
 
     # 8. Resumen mensual y WhatsApp
-    resp_resumen = client.get(f"/api/clientes/{cliente_id}/resumen")
+    resp_resumen = client.get(f"/api/clientes/{cliente_id}/resumen", headers=headers)
     assert resp_resumen.status_code == 200
     resumen = resp_resumen.json()
     assert "texto_whatsapp" in resumen
@@ -261,31 +280,49 @@ def test_spa_static_serving(client):
     assert resp_api_404.status_code == 404
     assert resp_api_404.headers.get("content-type", "").startswith("application/json")
 
+    # 5. Asegurar bloqueo contra Path Traversal
+    resp_traversal = client.get("/../../.env")
+    assert resp_traversal.status_code in (403, 404)
+    assert "CLOUDFLARE_TUNNEL_TOKEN" not in resp_traversal.text
+
 
 def test_exportar_excel(client):
     import io
     import openpyxl
 
-    # 1. Obtener un cliente existente
-    clientes = client.get("/api/clientes").json()["items"]
+    # 1. Login para obtener token
+    admin = client.get("/api/auth/operadores", headers={"x-store-key": "Despensa.Snoopy1980"}).json()[0]
+    token = client.post(
+        "/api/auth/login",
+        json={"usuario_id": admin["id"], "pin": "1111"},
+        headers={"x-store-key": "Despensa.Snoopy1980"}
+    ).json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}", "x-store-key": "Despensa.Snoopy1980"}
+
+    # 2. Obtener un cliente existente con token
+    clientes = client.get("/api/clientes", headers=headers).json()["items"]
     assert len(clientes) > 0
     cliente_id = clientes[0]["id"]
 
-    # 2. Descargar Excel completo
-    resp_excel = client.get(f"/api/clientes/{cliente_id}/exportar-excel")
+    # 3. Descarga sin autenticación debe retornar 401
+    resp_unauth = client.get(f"/api/clientes/{cliente_id}/exportar-excel")
+    assert resp_unauth.status_code == 401
+
+    # 4. Descargar Excel completo con token
+    resp_excel = client.get(f"/api/clientes/{cliente_id}/exportar-excel", headers=headers)
     assert resp_excel.status_code == 200
     assert "spreadsheetml.sheet" in resp_excel.headers["content-type"]
     assert "Libreta_" in resp_excel.headers["content-disposition"]
 
-    # 3. Validar con openpyxl que el archivo es un Excel válido
+    # 5. Validar con openpyxl que el archivo es un Excel válido
     wb = openpyxl.load_workbook(io.BytesIO(resp_excel.content))
     assert "Movimientos" in wb.sheetnames
     ws = wb["Movimientos"]
     assert ws["A1"].value == "DESPENSA SNOOPY - LIBRETA DE FIADOS"
     assert ws["B4"].value.startswith(clientes[0]["nombre"])
 
-    # 4. Descargar Excel filtrado por mes
-    resp_mes = client.get(f"/api/clientes/{cliente_id}/exportar-excel?mes=2026-10")
+    # 6. Descargar Excel filtrado por mes
+    resp_mes = client.get(f"/api/clientes/{cliente_id}/exportar-excel?mes=2026-10", headers=headers)
     assert resp_mes.status_code == 200
     wb_mes = openpyxl.load_workbook(io.BytesIO(resp_mes.content))
     ws_mes = wb_mes["Movimientos"]
@@ -311,7 +348,7 @@ def test_seguridad_rate_limiting_y_headers(client):
         resp_fail = client.post(
             "/api/auth/login",
             json={"usuario_id": admin["id"], "pin": f"000{i}"},
-            headers={"cf-connecting-ip": "203.0.113.50"}
+            headers={"cf-connecting-ip": "203.0.113.50", "x-store-key": "Despensa.Snoopy1980"}
         )
         assert resp_fail.status_code in (401, 429)
 
@@ -319,7 +356,7 @@ def test_seguridad_rate_limiting_y_headers(client):
     resp_lockout = client.post(
         "/api/auth/login",
         json={"usuario_id": admin["id"], "pin": "1111"},
-        headers={"cf-connecting-ip": "203.0.113.50"}
+        headers={"cf-connecting-ip": "203.0.113.50", "x-store-key": "Despensa.Snoopy1980"}
     )
     assert resp_lockout.status_code == 429
     assert "bloqueado" in resp_lockout.json()["detail"].lower()

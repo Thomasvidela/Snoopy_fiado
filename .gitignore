@@ -26,7 +26,9 @@ yarn-debug.log*
 yarn-error.log*
 
 # Environment & Secrets
-.env.local
+.env
+.env.*
+!.env.example
 
 # Backups
 backups/*.sql

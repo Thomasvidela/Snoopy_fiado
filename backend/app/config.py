@@ -13,7 +13,12 @@ class Settings(BaseSettings):
     MAX_LOGIN_ATTEMPTS: int = 5
     LOCKOUT_MINUTES: int = 15
     STORE_ACCESS_KEY: str = "Despensa.Snoopy1980"
-    CORS_ORIGINS: List[str] = ["*"]
+    CORS_ORIGINS: List[str] = [
+        "https://despensasnoopy.app",
+        "http://localhost:8000",
+        "http://localhost:5173",
+        "http://127.0.0.1:8000"
+    ]
 
     model_config = SettingsConfigDict(
         env_file=".env",

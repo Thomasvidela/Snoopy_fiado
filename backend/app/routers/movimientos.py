@@ -35,7 +35,8 @@ def listar_movimientos_cliente(
     cliente_id: int,
     limite: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    operador: Usuario = Depends(get_current_user)
 ):
     """Obtiene el historial de movimientos de un cliente ordenados del más reciente al más antiguo."""
     movimientos = (

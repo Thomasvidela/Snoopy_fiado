@@ -100,10 +100,22 @@ if dist_dir.exists() and (dist_dir / "index.html").exists():
         if full_path.startswith("api/") or full_path.startswith("docs") or full_path.startswith("openapi.json"):
             return JSONResponse(status_code=404, content={"detail": "Not Found"})
 
-        file_path = dist_dir / full_path
+        # Bloquear acceso a archivos ocultos (.env, .git) o secuencias de salto de directorio
+        if full_path.startswith(".") or ".." in full_path:
+            return JSONResponse(status_code=403, content={"detail": "Acceso denegado"})
+
+        dist_resolved = dist_dir.resolve()
+        try:
+            file_path = (dist_dir / full_path).resolve()
+            # Bloquear cualquier intento de Path Traversal fuera de dist
+            if not file_path.is_relative_to(dist_resolved):
+                return JSONResponse(status_code=403, content={"detail": "Acceso denegado"})
+        except (ValueError, RuntimeError):
+            return JSONResponse(status_code=403, content={"detail": "Acceso denegado"})
+
         if file_path.exists() and file_path.is_file():
             return FileResponse(str(file_path))
-        return FileResponse(str(dist_dir / "index.html"))
+        return FileResponse(str(dist_resolved / "index.html"))
 else:
     @app.get("/", include_in_schema=False)
     async def index_placeholder():

@@ -41,7 +41,7 @@ export const App: React.FC = () => {
 
   // Load clients
   const fetchClientes = useCallback(async (query?: string) => {
-    if (!storeAuth.isAuthorized()) return;
+    if (!storeAuth.isAuthorized() || !authStorage.getToken()) return;
     setLoadingClientes(true);
     try {
       const res = await api.getClientes(query);
@@ -61,15 +61,16 @@ export const App: React.FC = () => {
 
   // Debounced search
   useEffect(() => {
-    if (!storeAuth.isAuthorized()) return;
+    if (!storeAuth.isAuthorized() || !authStorage.getToken()) return;
     const timer = setTimeout(() => {
       fetchClientes(searchQuery);
     }, 250);
     return () => clearTimeout(timer);
-  }, [searchQuery, fetchClientes, storeGateOpen]);
+  }, [searchQuery, fetchClientes, storeGateOpen, currentOperator]);
 
   // Load movements when selected client changes
   const fetchMovimientos = useCallback(async (clienteId: number) => {
+    if (!storeAuth.isAuthorized() || !authStorage.getToken()) return;
     setLoadingMovimientos(true);
     try {
       const data = await api.getMovimientos(clienteId);

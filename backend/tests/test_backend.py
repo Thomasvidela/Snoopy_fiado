@@ -210,14 +210,32 @@ def test_flujo_completo_ledger_y_anulacion(client):
     assert resp_toggle_on.status_code == 200
     assert resp_toggle_on.json()["activo"] is True
 
+    # 7b. Editar datos del cliente (nombre, apodo, teléfono, activo)
+    resp_update = client.put(
+        f"/api/clientes/{cliente_id}",
+        json={
+            "nombre": "Carlos Alberto Tevez",
+            "apodo": "El Jugador del Pueblo",
+            "telefono": "11 9999-8888",
+            "activo": True
+        },
+        headers=headers
+    )
+    assert resp_update.status_code == 200
+    updated_cliente = resp_update.json()
+    assert updated_cliente["nombre"] == "Carlos Alberto Tevez"
+    assert updated_cliente["apodo"] == "El Jugador del Pueblo"
+    assert "9999-8888" in updated_cliente["telefono"]
+    assert updated_cliente["telefono"].startswith("+54")
+
     # 8. Resumen mensual y WhatsApp
     resp_resumen = client.get(f"/api/clientes/{cliente_id}/resumen")
     assert resp_resumen.status_code == 200
     resumen = resp_resumen.json()
     assert "texto_whatsapp" in resumen
     assert "Despensa Snoopy" in resumen["texto_whatsapp"]
-    assert "Carlos Tevez" in resumen["texto_whatsapp"]
-    assert "El Apache" in resumen["texto_whatsapp"]
+    assert "Carlos Alberto Tevez" in resumen["texto_whatsapp"]
+    assert "El Jugador del Pueblo" in resumen["texto_whatsapp"]
     assert "$5.000,00" in resumen["texto_whatsapp"]
 
 

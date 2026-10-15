@@ -1,10 +1,9 @@
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   ArrowLeft,
   Phone,
   PlusCircle,
   CheckCircle2,
-  Share2,
   Calendar,
   Tag,
   MessageCircle,
@@ -12,10 +11,14 @@ import {
   UserX,
   UserCheck,
   AlertTriangle,
+  MoreVertical,
+  Edit3,
 } from 'lucide-react';
 import { Cliente, Movimiento } from '../types';
 import { MovementList } from './MovementList';
+import { EditClientModal } from './EditClientModal';
 import { formatCurrency, normalizeArgentinePhone, getWhatsAppCleanNumber } from '../utils/format';
+import { hapticTap } from '../utils/haptics';
 import { api } from '../api/client';
 
 interface ClientDetailProps {
@@ -27,6 +30,7 @@ interface ClientDetailProps {
   onOpenWhatsAppModal: () => void;
   onAnularMovimiento: (movimientoId: number) => Promise<void>;
   onToggleActivo?: (clienteId: number) => Promise<void>;
+  onUpdateCliente?: (clienteActualizado: Cliente) => void;
 }
 
 export const ClientDetail: React.FC<ClientDetailProps> = ({
@@ -38,9 +42,28 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
   onOpenWhatsAppModal,
   onAnularMovimiento,
   onToggleActivo,
+  onUpdateCliente,
 }) => {
-  const [exportandoExcel, setExportandoExcel] = React.useState<boolean>(false);
-  const [togglingActivo, setTogglingActivo] = React.useState<boolean>(false);
+  const [exportandoExcel, setExportandoExcel] = useState<boolean>(false);
+  const [togglingActivo, setTogglingActivo] = useState<boolean>(false);
+  const [menuOpen, setMenuOpen] = useState<boolean>(false);
+  const [editModalOpen, setEditModalOpen] = useState<boolean>(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    if (menuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [menuOpen]);
 
   const handleExportarExcel = async () => {
     if (!cliente) return;
@@ -148,55 +171,92 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
-            {/* Toggle Activo Button */}
-            {onToggleActivo && (
-              <button
-                onClick={handleToggleActivo}
-                disabled={togglingActivo}
-                title={cliente.activo ? "Deshabilitar cliente (bloquea compras y cobros)" : "Reactivar cuenta corriente"}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold transition active:scale-95 disabled:opacity-50 ${
-                  cliente.activo
-                    ? 'bg-rose-950/20 hover:bg-rose-950/40 border-rose-800/40 text-rose-300'
-                    : 'bg-emerald-950/20 hover:bg-emerald-950/40 border-emerald-700/40 text-emerald-300'
-                }`}
-              >
-                {cliente.activo ? (
-                  <UserX className="w-4 h-4 text-rose-400" />
-                ) : (
-                  <UserCheck className="w-4 h-4 text-emerald-400" />
-                )}
-                <span className="hidden sm:inline">
-                  {cliente.activo ? 'Deshabilitar' : 'Reactivar'}
-                </span>
-              </button>
-            )}
-
-            {/* Quick Excel Export Button */}
-            <button
-              onClick={handleExportarExcel}
-              disabled={exportandoExcel}
-              title="Descargar libro mayor en Excel (.xlsx)"
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-700/20 hover:bg-emerald-700/30 border border-emerald-600/40 text-emerald-300 text-xs font-semibold transition active:scale-95 disabled:opacity-50"
-            >
-              {exportandoExcel ? (
-                <div className="w-4 h-4 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
-              )}
-              <span className="hidden sm:inline">Excel</span>
-            </button>
-
+          <div className="flex items-center gap-2 shrink-0">
             {/* Quick WhatsApp Summary Button */}
             <button
               onClick={onOpenWhatsAppModal}
               title="Enviar resumen mensual por WhatsApp"
               className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600/15 hover:bg-emerald-600/25 border border-emerald-500/30 text-emerald-400 text-xs font-semibold transition active:scale-95"
             >
-              <Share2 className="w-4 h-4" />
-              <span className="hidden sm:inline">Resumen WhatsApp</span>
-              <span className="sm:hidden">WhatsApp</span>
+              <MessageCircle className="w-4 h-4" />
+              <span className="hidden sm:inline">WhatsApp</span>
             </button>
+
+            {/* Three Dots Menu Button (⋮) */}
+            <div className="relative" ref={menuRef}>
+              <button
+                onClick={() => {
+                  hapticTap(15);
+                  setMenuOpen(!menuOpen);
+                }}
+                title="Opciones del cliente"
+                className={`p-2 rounded-xl border text-slate-300 hover:text-white transition active:scale-95 ${
+                  menuOpen
+                    ? 'bg-slate-700 border-emerald-500/50 text-white shadow-sm'
+                    : 'bg-slate-800 hover:bg-slate-700 border-slate-700/80'
+                }`}
+              >
+                <MoreVertical className="w-5 h-5" />
+              </button>
+
+              {menuOpen && (
+                <div className="absolute right-0 mt-2 w-56 rounded-2xl bg-slate-800 border border-slate-700 shadow-2xl py-1.5 z-30 animate-in fade-in zoom-in-95">
+                  {/* Opción 1: Editar datos */}
+                  <button
+                    onClick={() => {
+                      hapticTap(15);
+                      setMenuOpen(false);
+                      setEditModalOpen(true);
+                    }}
+                    className="w-full px-4 py-2.5 text-left text-xs font-medium text-slate-200 hover:bg-slate-700/80 hover:text-white flex items-center gap-2.5 transition"
+                  >
+                    <Edit3 className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>Editar datos del cliente</span>
+                  </button>
+
+                  {/* Opción 2: Habilitar / Deshabilitar */}
+                  {onToggleActivo && (
+                    <button
+                      onClick={() => {
+                        hapticTap(15);
+                        setMenuOpen(false);
+                        handleToggleActivo();
+                      }}
+                      disabled={togglingActivo}
+                      className="w-full px-4 py-2.5 text-left text-xs font-medium text-slate-200 hover:bg-slate-700/80 hover:text-white flex items-center gap-2.5 transition disabled:opacity-50"
+                    >
+                      {cliente.activo ? (
+                        <>
+                          <UserX className="w-4 h-4 text-rose-400 shrink-0" />
+                          <span className="text-rose-300">Deshabilitar cuenta</span>
+                        </>
+                      ) : (
+                        <>
+                          <UserCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                          <span className="text-emerald-300">Reactivar cuenta</span>
+                        </>
+                      )}
+                    </button>
+                  )}
+
+                  <div className="my-1 border-t border-slate-700/60" />
+
+                  {/* Opción 3: Exportar Excel */}
+                  <button
+                    onClick={() => {
+                      hapticTap(15);
+                      setMenuOpen(false);
+                      handleExportarExcel();
+                    }}
+                    disabled={exportandoExcel}
+                    className="w-full px-4 py-2.5 text-left text-xs font-medium text-slate-200 hover:bg-slate-700/80 hover:text-white flex items-center gap-2.5 transition disabled:opacity-50"
+                  >
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>Descargar Excel (.xlsx)</span>
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -293,6 +353,18 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
           onAnular={onAnularMovimiento}
         />
       </div>
+
+      {/* Modal para editar datos del cliente */}
+      <EditClientModal
+        isOpen={editModalOpen}
+        cliente={cliente}
+        onClose={() => setEditModalOpen(false)}
+        onSuccess={(updated) => {
+          if (onUpdateCliente) {
+            onUpdateCliente(updated);
+          }
+        }}
+      />
     </div>
   );
 };

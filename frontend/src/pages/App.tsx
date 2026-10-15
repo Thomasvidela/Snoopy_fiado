@@ -165,6 +165,12 @@ export const App: React.FC = () => {
     setSelectedCliente((prev) => (prev && prev.id === clienteId ? updated : prev));
   };
 
+  // Update client data handler (name, alias, phone, active)
+  const handleUpdateCliente = (updated: Cliente) => {
+    setClientes((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+    setSelectedCliente((prev) => (prev && prev.id === updated.id ? updated : prev));
+  };
+
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-slate-900 text-slate-100">
       {/* Top Navigation */}
@@ -227,6 +233,7 @@ export const App: React.FC = () => {
               onOpenWhatsAppModal={() => setWhatsAppModalOpen(true)}
               onAnularMovimiento={handleAnularMovimiento}
               onToggleActivo={handleToggleClienteActivo}
+              onUpdateCliente={handleUpdateCliente}
             />
           </div>
         </div>

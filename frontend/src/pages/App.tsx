@@ -8,6 +8,7 @@ import { MovementModal } from '../components/MovementModal';
 import { WhatsAppModal } from '../components/WhatsAppModal';
 import { NewClientModal } from '../components/NewClientModal';
 import { ManageOperatorsModal } from '../components/ManageOperatorsModal';
+import { ManageProductsModal } from '../components/ManageProductsModal';
 import { StoreGateModal } from '../components/StoreGateModal';
 import { Cliente, Movimiento, MovimientoCreatePayload, Operador } from '../types';
 import { api, authStorage, storeAuth } from '../api/client';
@@ -35,6 +36,7 @@ export const App: React.FC = () => {
   const [whatsAppModalOpen, setWhatsAppModalOpen] = useState<boolean>(false);
   const [newClientModalOpen, setNewClientModalOpen] = useState<boolean>(false);
   const [manageOperatorsOpen, setManageOperatorsOpen] = useState<boolean>(false);
+  const [manageProductsOpen, setManageProductsOpen] = useState<boolean>(false);
 
   // Mobile view state: 'list' or 'detail'
   const [mobileView, setMobileView] = useState<'list' | 'detail'>('list');
@@ -172,6 +174,20 @@ export const App: React.FC = () => {
     setSelectedCliente((prev) => (prev && prev.id === updated.id ? updated : prev));
   };
 
+  // Refresh selected client and list after dynamic article updates or price changes
+  const handleRefreshSelectedCliente = useCallback(async () => {
+    await fetchClientes(searchQuery);
+    if (selectedCliente) {
+      try {
+        const fresh = await api.getCliente(selectedCliente.id);
+        setSelectedCliente(fresh);
+        await fetchMovimientos(selectedCliente.id);
+      } catch (err) {
+        console.error('Error al refrescar cliente seleccionado:', err);
+      }
+    }
+  }, [fetchClientes, fetchMovimientos, searchQuery, selectedCliente]);
+
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-slate-900 text-slate-100">
       {/* Top Navigation */}
@@ -179,6 +195,7 @@ export const App: React.FC = () => {
         currentOperator={currentOperator}
         onSwitchOperator={() => setPinModalOpen(true)}
         onManageOperators={() => setManageOperatorsOpen(true)}
+        onManageProducts={() => setManageProductsOpen(true)}
         onNewClient={() => setNewClientModalOpen(true)}
       />
 
@@ -235,6 +252,7 @@ export const App: React.FC = () => {
               onAnularMovimiento={handleAnularMovimiento}
               onToggleActivo={handleToggleClienteActivo}
               onUpdateCliente={handleUpdateCliente}
+              onRefreshClient={handleRefreshSelectedCliente}
             />
           </div>
         </div>
@@ -295,6 +313,13 @@ export const App: React.FC = () => {
           setSelectedCliente(nuevo);
           setMobileView('detail');
         }}
+      />
+
+      {/* Manage Products Modal (Precios dinámicos de Garrafas, etc.) */}
+      <ManageProductsModal
+        isOpen={manageProductsOpen}
+        onClose={() => setManageProductsOpen(false)}
+        onProductsUpdated={handleRefreshSelectedCliente}
       />
 
       {/* Store Gatekeeper Modal (Clave Maestra del Comercio) */}

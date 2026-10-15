@@ -79,6 +79,12 @@ class Cliente(Base):
         back_populates="cliente",
         order_by="desc(Movimiento.fecha_creacion)"
     )
+    articulos: Mapped[List["ClienteArticulo"]] = relationship(
+        "ClienteArticulo",
+        foreign_keys="ClienteArticulo.cliente_id",
+        back_populates="cliente",
+        order_by="desc(ClienteArticulo.fecha_creacion)"
+    )
 
 
 class Movimiento(Base):
@@ -128,3 +134,51 @@ class Movimiento(Base):
     __table_args__ = (
         Index("ix_movimientos_cliente_fecha", "cliente_id", "fecha_creacion"),
     )
+
+
+class EstadoArticulo(str, PyEnum):
+    PENDIENTE = "PENDIENTE"
+    LIQUIDADO = "LIQUIDADO"
+    DEVUELTO = "DEVUELTO"
+
+
+class Producto(Base):
+    __tablename__ = "productos"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    nombre: Mapped[str] = mapped_column(String(150), unique=True, nullable=False, index=True)
+    precio_actual: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    unidad: Mapped[str] = mapped_column(String(50), default="unidad", nullable=False)
+    activo: Mapped[bool] = mapped_column(Boolean, default=True, index=True, nullable=False)
+    fecha_creacion: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+    fecha_actualizacion: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
+
+    articulos: Mapped[List["ClienteArticulo"]] = relationship("ClienteArticulo", back_populates="producto")
+
+
+class ClienteArticulo(Base):
+    __tablename__ = "cliente_articulos"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    cliente_id: Mapped[int] = mapped_column(ForeignKey("clientes.id"), nullable=False, index=True)
+    producto_id: Mapped[int] = mapped_column(ForeignKey("productos.id"), nullable=False, index=True)
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), nullable=False)
+    cantidad: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("1.00"), nullable=False)
+    nota: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    estado: Mapped[EstadoArticulo] = mapped_column(
+        Enum(EstadoArticulo, name="estado_articulo"),
+        default=EstadoArticulo.PENDIENTE,
+        index=True,
+        nullable=False
+    )
+    fecha_creacion: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+
+    movimiento_id: Mapped[Optional[int]] = mapped_column(ForeignKey("movimientos.id"), nullable=True)
+    precio_liquidado: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2), nullable=True)
+    fecha_liquidacion: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    cliente: Mapped["Cliente"] = relationship("Cliente", back_populates="articulos")
+    producto: Mapped["Producto"] = relationship("Producto", back_populates="articulos")
+    operador: Mapped["Usuario"] = relationship("Usuario")
+    movimiento: Mapped[Optional["Movimiento"]] = relationship("Movimiento")
+

@@ -361,3 +361,88 @@ def test_seguridad_rate_limiting_y_headers(client):
     assert resp_lockout.status_code == 429
     assert "bloqueado" in resp_lockout.json()["detail"].lower()
 
+
+def test_productos_dinamicos_y_articulos(client):
+    # 1. Login como administrador
+    admin = client.get("/api/auth/operadores", headers={"x-store-key": "Despensa.Snoopy1980"}).json()[0]
+    token = client.post(
+        "/api/auth/login",
+        json={"usuario_id": admin["id"], "pin": "1111"},
+        headers={"x-store-key": "Despensa.Snoopy1980"}
+    ).json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}", "x-store-key": "Despensa.Snoopy1980"}
+
+    # 2. Listar productos sembrados
+    prods = client.get("/api/productos", headers=headers).json()
+    assert len(prods) >= 1
+    garrafa = next(p for p in prods if "garrafa" in p["nombre"].lower())
+    assert Decimal(str(garrafa["precio_actual"])) == Decimal("12000.00")
+
+    # 3. Crear cliente de prueba
+    cli_resp = client.post(
+        "/api/clientes",
+        json={"nombre": "Vecino Gas", "saldo_inicial": "0.00"},
+        headers=headers
+    )
+    assert cli_resp.status_code == 201
+    cliente = cli_resp.json()
+    cli_id = cliente["id"]
+    assert Decimal(str(cliente["saldo_actual"])) == Decimal("0.00")
+    assert Decimal(str(cliente["total_articulos_pendientes"])) == Decimal("0.00")
+
+    # 4. Anotar 1 Garrafa de 10kg en la libreta del cliente
+    art_resp = client.post(
+        f"/api/clientes/{cli_id}/articulos",
+        json={"producto_id": garrafa["id"], "cantidad": "1.00", "nota": "Envase azul"},
+        headers=headers
+    )
+    assert art_resp.status_code == 201
+    articulo = art_resp.json()
+    art_id = articulo["id"]
+    assert articulo["estado"] == "PENDIENTE"
+    assert Decimal(str(articulo["subtotal_actual"])) == Decimal("12000.00")
+
+    # 5. El cliente debe mostrar saldo contable $0 pero saldo_total dinámico de $12.000
+    cli_check = client.get(f"/api/clientes/{cli_id}", headers=headers).json()
+    assert Decimal(str(cli_check["saldo_actual"])) == Decimal("0.00")
+    assert Decimal(str(cli_check["total_articulos_pendientes"])) == Decimal("12000.00")
+    assert Decimal(str(cli_check["saldo_total"])) == Decimal("12000.00")
+    assert cli_check["articulos_pendientes_count"] == 1
+
+    # 6. Actualizar el precio de la garrafa en el catálogo (de $12.000 a $13.500)
+    update_prod = client.put(
+        f"/api/productos/{garrafa['id']}",
+        json={"precio_actual": "13500.00"},
+        headers=headers
+    )
+    assert update_prod.status_code == 200
+
+    # 7. El valor dinámico en la libreta del cliente debe haberse actualizado AUTOMÁTICAMENTE a $13.500
+    cli_check2 = client.get(f"/api/clientes/{cli_id}", headers=headers).json()
+    assert Decimal(str(cli_check2["total_articulos_pendientes"])) == Decimal("13500.00")
+    assert Decimal(str(cli_check2["saldo_total"])) == Decimal("13500.00")
+
+    # 8. Verificar que el resumen de WhatsApp incluye la garrafa al valor actual de $13.500
+    resumen = client.get(f"/api/clientes/{cli_id}/resumen", headers=headers).json()
+    assert "Garrafa de gas 10kg" in resumen["texto_whatsapp"]
+    assert "$13.500,00" in resumen["texto_whatsapp"]
+
+    # 9. Liquidar la garrafa al momento de cerrar la cuenta
+    liq_resp = client.post(
+        f"/api/clientes/{cli_id}/articulos/liquidar",
+        json={"articulo_ids": [art_id]},
+        headers=headers
+    )
+    assert liq_resp.status_code == 200
+    liq_data = liq_resp.json()
+    assert Decimal(str(liq_data["total_liquidado"])) == Decimal("13500.00")
+    assert Decimal(str(liq_data["nuevo_saldo_actual"])) == Decimal("13500.00")
+
+    # 10. Ahora ya no hay artículos pendientes y el saldo contable en el ledger es $13.500
+    cli_check3 = client.get(f"/api/clientes/{cli_id}", headers=headers).json()
+    assert Decimal(str(cli_check3["saldo_actual"])) == Decimal("13500.00")
+    assert Decimal(str(cli_check3["total_articulos_pendientes"])) == Decimal("0.00")
+    assert Decimal(str(cli_check3["saldo_total"])) == Decimal("13500.00")
+    assert cli_check3["articulos_pendientes_count"] == 0
+
+

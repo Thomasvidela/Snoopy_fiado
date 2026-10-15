@@ -38,11 +38,11 @@ export const ClientList: React.FC<ClientListProps> = ({
     });
   }, [clientes, filter]);
 
-  // Total deuda en la calle (solo de clientes activos)
+  // Total deuda en la calle (solo de clientes activos, incluyendo productos a cotización actual)
   const totalDeuda = useMemo(() => {
     return clientes.reduce((acc, c) => {
       if (!c.activo) return acc;
-      const s = parseFloat(c.saldo_actual);
+      const s = parseFloat(c.saldo_total || c.saldo_actual);
       return s > 0 ? acc + s : acc;
     }, 0);
   }, [clientes]);
@@ -138,10 +138,12 @@ export const ClientList: React.FC<ClientListProps> = ({
           </div>
         ) : (
           filteredClientes.map((cliente) => {
-            const saldoNum = parseFloat(cliente.saldo_actual);
+            const displaySaldo = cliente.saldo_total || cliente.saldo_actual;
+            const saldoNum = parseFloat(displaySaldo);
             const isSelected = selectedClienteId === cliente.id;
             const hasDebt = saldoNum > 0;
             const isCredit = saldoNum < 0;
+            const articulosCount = cliente.articulos_pendientes_count || 0;
 
             return (
               <button
@@ -215,19 +217,29 @@ export const ClientList: React.FC<ClientListProps> = ({
                         : 'text-emerald-400'
                     }`}
                   >
-                    {formatCurrency(cliente.saldo_actual)}
+                    {formatCurrency(displaySaldo)}
                   </div>
-                  <span
-                    className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full inline-block ${
-                      hasDebt
-                        ? 'bg-rose-500/10 text-rose-300'
-                        : isCredit
-                        ? 'bg-cyan-500/10 text-cyan-300'
-                        : 'bg-emerald-500/10 text-emerald-300'
-                    }`}
-                  >
-                    {hasDebt ? 'Debe' : isCredit ? 'A favor' : 'Al día'}
-                  </span>
+                  <div className="flex items-center justify-end gap-1 mt-0.5">
+                    {articulosCount > 0 && (
+                      <span
+                        title={`${articulosCount} producto(s) a cotización de hoy`}
+                        className="text-[10px] font-semibold px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0"
+                      >
+                        📦 {articulosCount}
+                      </span>
+                    )}
+                    <span
+                      className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full inline-block ${
+                        hasDebt
+                          ? 'bg-rose-500/10 text-rose-300'
+                          : isCredit
+                          ? 'bg-cyan-500/10 text-cyan-300'
+                          : 'bg-emerald-500/10 text-emerald-300'
+                      }`}
+                    >
+                      {hasDebt ? 'Debe' : isCredit ? 'A favor' : 'Al día'}
+                    </span>
+                  </div>
                 </div>
               </button>
             );

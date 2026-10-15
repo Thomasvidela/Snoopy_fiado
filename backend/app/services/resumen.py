@@ -5,8 +5,8 @@ from typing import List, Tuple
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.models import Cliente, Movimiento, TipoMovimiento
-from app.schemas import ClienteOut, MovimientoOut, ResumenMensualOut
+from app.models import Cliente, ClienteArticulo, EstadoArticulo, Movimiento, TipoMovimiento
+from app.schemas import ClienteArticuloOut, ClienteOut, MovimientoOut, ResumenMensualOut
 
 MESES_ES = {
     1: "Enero",
@@ -158,13 +158,62 @@ class ResumenService:
             elif m.tipo in (TipoMovimiento.ANULACION_CARGO, TipoMovimiento.ANULACION_PAGO):
                 lineas_detalle.append(f"- {fecha_str}: {m.tipo.value} ({formatear_pesos(m.monto)})")
 
+        # Artículos dinámicos pendientes de cotización (ej: garrafas de gas)
+        articulos_pendientes_db = (
+            db.query(ClienteArticulo)
+            .filter(
+                ClienteArticulo.cliente_id == cliente_id,
+                ClienteArticulo.estado == EstadoArticulo.PENDIENTE
+            )
+            .order_by(ClienteArticulo.fecha_creacion.asc())
+            .all()
+        )
+
+        total_articulos = Decimal("0.00")
+        lineas_articulos = []
+        articulos_out = []
+        for art in articulos_pendientes_db:
+            subtotal = art.cantidad * art.producto.precio_actual
+            total_articulos += subtotal
+            articulos_out.append(
+                ClienteArticuloOut(
+                    id=art.id,
+                    cliente_id=art.cliente_id,
+                    producto_id=art.producto_id,
+                    producto_nombre=art.producto.nombre,
+                    producto_unidad=art.producto.unidad,
+                    precio_unitario_actual=art.producto.precio_actual,
+                    cantidad=art.cantidad,
+                    subtotal_actual=subtotal,
+                    nota=art.nota,
+                    estado=art.estado.value,
+                    fecha_creacion=art.fecha_creacion,
+                    usuario_nombre=art.operador.nombre if art.operador else None,
+                    movimiento_id=art.movimiento_id,
+                    precio_liquidado=art.precio_liquidado,
+                    fecha_liquidacion=art.fecha_liquidacion
+                )
+            )
+            cant_str = f"{art.cantidad:g}"
+            lineas_articulos.append(f"• {cant_str}x {art.producto.nombre} ({formatear_pesos(art.producto.precio_actual)} c/u): {formatear_pesos(subtotal)}")
+
         nombre_mes = MESES_ES.get(mes, str(mes))
         alias_texto = f" ({cliente.apodo})" if cliente.apodo else ""
 
         if not lineas_detalle:
-            bloque_detalle = "- Sin movimientos registrados en este período."
+            bloque_detalle = "- Sin movimientos en cuenta registrados en este período."
         else:
             bloque_detalle = "\n".join(lineas_detalle)
+
+        saldo_total_con_articulos = saldo_final + total_articulos
+
+        bloque_articulos_txt = ""
+        if lineas_articulos:
+            bloque_articulos_txt = (
+                f"\n*Productos pendientes de cotización (al valor de hoy):*\n"
+                + "\n".join(lineas_articulos)
+                + f"\n- Subtotal productos: {formatear_pesos(total_articulos)}\n"
+            )
 
         texto_whatsapp = (
             f"*Despensa Snoopy*\n"
@@ -174,21 +223,38 @@ class ResumenService:
             f"- Saldo anterior: {formatear_pesos(saldo_anterior)}\n"
             f"- (+) Compras del mes: {formatear_pesos(total_cargos)}\n"
             f"- (-) Pagos/Entregas: {formatear_pesos(total_pagos)}\n"
+            f"- Saldo cuenta en pesos: {formatear_pesos(saldo_final)}\n"
+            f"{bloque_articulos_txt}"
             f"--------------------------------\n"
-            f"*SALDO TOTAL: {formatear_pesos(saldo_final)}*\n"
+            f"*TOTAL FINAL A PAGAR: {formatear_pesos(saldo_total_con_articulos)}*\n"
             f"--------------------------------\n\n"
-            f"*Detalle de movimientos:*\n"
+            f"*Detalle de movimientos en cuenta:*\n"
             f"{bloque_detalle}\n\n"
             f"¡Muchas gracias por su compra!"
         )
 
         return ResumenMensualOut(
-            cliente=ClienteOut.model_validate(cliente),
+            cliente=ClienteOut(
+                id=cliente.id,
+                nombre=cliente.nombre,
+                apodo=cliente.apodo,
+                telefono=cliente.telefono,
+                saldo_actual=cliente.saldo_actual,
+                ultima_actividad=cliente.ultima_actividad,
+                activo=cliente.activo,
+                fecha_alta=cliente.fecha_alta,
+                total_articulos_pendientes=total_articulos,
+                articulos_pendientes_count=len(articulos_pendientes_db),
+                saldo_total=saldo_total_con_articulos
+            ),
             periodo=periodo,
             saldo_anterior=saldo_anterior,
             total_cargos_periodo=total_cargos,
             total_pagos_periodo=total_pagos,
             saldo_final_periodo=saldo_final,
             movimientos=movimientos_out,
+            articulos_pendientes=articulos_out,
+            total_articulos_pendientes=total_articulos,
+            saldo_total_con_articulos=saldo_total_con_articulos,
             texto_whatsapp=texto_whatsapp
         )

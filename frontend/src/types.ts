@@ -16,6 +16,9 @@ export interface Cliente {
   ultima_actividad: string;
   activo: boolean;
   fecha_alta: string;
+  total_articulos_pendientes?: string;
+  articulos_pendientes_count?: number;
+  saldo_total?: string;
 }
 
 export interface ListadoClientesResponse {
@@ -40,6 +43,53 @@ export interface Movimiento {
   fecha_creacion: string;
 }
 
+export interface Producto {
+  id: number;
+  nombre: string;
+  precio_actual: string;
+  unidad: string;
+  activo: boolean;
+  fecha_creacion: string;
+  fecha_actualizacion: string;
+}
+
+export interface ProductoCreatePayload {
+  nombre: string;
+  precio_actual: string | number;
+  unidad?: string;
+}
+
+export interface ProductoUpdatePayload {
+  nombre?: string;
+  precio_actual?: string | number;
+  unidad?: string;
+  activo?: boolean;
+}
+
+export interface ClienteArticulo {
+  id: number;
+  cliente_id: number;
+  producto_id: number;
+  producto_nombre: string;
+  producto_unidad: string;
+  precio_unitario_actual: string;
+  cantidad: string;
+  subtotal_actual: string;
+  nota?: string | null;
+  estado: 'PENDIENTE' | 'LIQUIDADO' | 'DEVUELTO';
+  fecha_creacion: string;
+  usuario_nombre?: string | null;
+  movimiento_id?: number | null;
+  precio_liquidado?: string | null;
+  fecha_liquidacion?: string | null;
+}
+
+export interface ClienteArticuloCreatePayload {
+  producto_id: number;
+  cantidad: string | number;
+  nota?: string;
+}
+
 export interface ResumenMensual {
   cliente: Cliente;
   periodo: string;
@@ -48,6 +98,9 @@ export interface ResumenMensual {
   total_pagos_periodo: string;
   saldo_final_periodo: string;
   movimientos: Movimiento[];
+  articulos_pendientes?: ClienteArticulo[];
+  total_articulos_pendientes?: string;
+  saldo_total_con_articulos?: string;
   texto_whatsapp: string;
 }
 

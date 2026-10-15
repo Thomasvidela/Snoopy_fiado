@@ -210,10 +210,17 @@ export const WhatsAppModal: React.FC<WhatsAppModalProps> = ({
               <div className="bg-slate-900/90 p-2.5 rounded-xl border border-emerald-500/30">
                 <span className="text-[10px] text-emerald-400 block font-semibold">Total a Pagar</span>
                 <span className="text-xs font-bold text-white">
-                  {formatCurrency(resumen.saldo_final_periodo)}
+                  {formatCurrency(resumen.saldo_total_con_articulos || resumen.saldo_final_periodo)}
                 </span>
               </div>
             </div>
+
+            {resumen.articulos_pendientes && resumen.articulos_pendientes.length > 0 && (
+              <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-2.5 text-xs text-amber-300 flex items-center justify-between">
+                <span>📦 Incluye {resumen.articulos_pendientes.length} producto(s) a cotización de hoy:</span>
+                <span className="font-bold">+{formatCurrency(resumen.total_articulos_pendientes || '0')}</span>
+              </div>
+            )}
 
             {/* Formatted Message Preview */}
             <div>

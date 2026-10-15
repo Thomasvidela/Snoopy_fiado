@@ -1,5 +1,7 @@
 import {
   Cliente,
+  ClienteArticulo,
+  ClienteArticuloCreatePayload,
   ClienteCreatePayload,
   ListadoClientesResponse,
   LoginResponse,
@@ -7,6 +9,9 @@ import {
   MovimientoCreatePayload,
   Operador,
   OperadorCreatePayload,
+  Producto,
+  ProductoCreatePayload,
+  ProductoUpdatePayload,
   ResumenMensual,
 } from '../types';
 
@@ -200,4 +205,52 @@ export const api = {
     document.body.removeChild(a);
     window.URL.revokeObjectURL(url);
   },
+
+  // Productos de Precio Dinámico
+  getProductos: (incluirInactivos: boolean = false) =>
+    apiRequest<Producto[]>(`/productos${incluirInactivos ? '?incluir_inactivos=true' : ''}`),
+  createProducto: (payload: ProductoCreatePayload) =>
+    apiRequest<Producto>('/productos', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateProducto: (id: number, payload: ProductoUpdatePayload) =>
+    apiRequest<Producto>(`/productos/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  deleteProducto: (id: number) =>
+    apiRequest<{ ok: boolean; mensaje: string; eliminado_fisicamente: boolean }>(
+      `/productos/${id}`,
+      { method: 'DELETE' }
+    ),
+
+  // Artículos Dinámicos por Cliente (Fiados en Especies)
+  getClienteArticulos: (clienteId: number, soloPendientes: boolean = true) =>
+    apiRequest<ClienteArticulo[]>(
+      `/clientes/${clienteId}/articulos${soloPendientes ? '?solo_pendientes=true' : '?solo_pendientes=false'}`
+    ),
+  createClienteArticulo: (clienteId: number, payload: ClienteArticuloCreatePayload) =>
+    apiRequest<ClienteArticulo>(`/clientes/${clienteId}/articulos`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  liquidarClienteArticulos: (
+    clienteId: number,
+    payload: { articulo_ids?: number[]; nota_adicional?: string } = {}
+  ) =>
+    apiRequest<{
+      ok: boolean;
+      mensaje: string;
+      total_liquidado: string;
+      nuevo_saldo_actual: string;
+      articulos_liquidados: ClienteArticulo[];
+    }>(`/clientes/${clienteId}/articulos/liquidar`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  cancelarClienteArticulo: (articuloId: number) =>
+    apiRequest<{ ok: boolean; mensaje: string }>(`/articulos/${articuloId}`, {
+      method: 'DELETE',
+    }),
 };

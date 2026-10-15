@@ -4,17 +4,43 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models import Cliente, Movimiento, Usuario, ahora_argentina
+from app.models import Cliente, ClienteArticulo, EstadoArticulo, Movimiento, Usuario, ahora_argentina
 from app.schemas import ClienteCreate, ClienteOut, ClienteUpdate, ListadoClientesResponse, ResumenMensualOut
 from app.services.excel import generar_excel_cliente
 from app.services.ledger import LedgerService, normalizar_telefono_argentina
 from app.services.resumen import ResumenService, parse_periodo
 
 router = APIRouter(prefix="/clientes", tags=["Clientes"])
+
+
+def _map_cliente_out(cliente: Cliente) -> ClienteOut:
+    total_articulos = Decimal("0.00")
+    count_articulos = 0
+    if hasattr(cliente, "articulos") and cliente.articulos:
+        for art in cliente.articulos:
+            if art.estado == EstadoArticulo.PENDIENTE:
+                count_articulos += 1
+                total_articulos += art.cantidad * art.producto.precio_actual
+
+    saldo_total = cliente.saldo_actual + total_articulos
+
+    return ClienteOut(
+        id=cliente.id,
+        nombre=cliente.nombre,
+        apodo=cliente.apodo,
+        telefono=cliente.telefono,
+        saldo_actual=cliente.saldo_actual,
+        ultima_actividad=cliente.ultima_actividad,
+        activo=cliente.activo,
+        fecha_alta=cliente.fecha_alta,
+        total_articulos_pendientes=total_articulos,
+        articulos_pendientes_count=count_articulos,
+        saldo_total=saldo_total
+    )
 
 
 @router.get("", response_model=ListadoClientesResponse)
@@ -47,6 +73,7 @@ def listar_clientes(
     total = query.count()
     items = (
         query
+        .options(selectinload(Cliente.articulos).selectinload(ClienteArticulo.producto))
         .order_by(Cliente.ultima_actividad.desc(), Cliente.id.desc())
         .offset(offset)
         .limit(limite)
@@ -54,7 +81,7 @@ def listar_clientes(
     )
 
     return ListadoClientesResponse(
-        items=[ClienteOut.model_validate(c) for c in items],
+        items=[_map_cliente_out(c) for c in items],
         total=total
     )
 
@@ -67,7 +94,7 @@ def crear_cliente(
 ):
     """Crea un nuevo cliente y registra el saldo inicial si corresponde."""
     cliente = LedgerService.crear_cliente(db=db, datos=payload, operador=operador)
-    return ClienteOut.model_validate(cliente)
+    return _map_cliente_out(cliente)
 
 
 @router.get("/{cliente_id}", response_model=ClienteOut)
@@ -77,13 +104,18 @@ def obtener_cliente(
     operador: Usuario = Depends(get_current_user)
 ):
     """Obtiene los detalles y saldo actual de un cliente."""
-    cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+    cliente = (
+        db.query(Cliente)
+        .options(selectinload(Cliente.articulos).selectinload(ClienteArticulo.producto))
+        .filter(Cliente.id == cliente_id)
+        .first()
+    )
     if not cliente:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Cliente no encontrado."
         )
-    return ClienteOut.model_validate(cliente)
+    return _map_cliente_out(cliente)
 
 
 @router.put("/{cliente_id}", response_model=ClienteOut)
@@ -112,7 +144,7 @@ def actualizar_cliente(
 
     db.commit()
     db.refresh(cliente)
-    return ClienteOut.model_validate(cliente)
+    return _map_cliente_out(cliente)
 
 
 @router.patch("/{cliente_id}/toggle-activo", response_model=ClienteOut)
@@ -131,7 +163,7 @@ def toggle_cliente_activo(
     cliente.activo = not cliente.activo
     db.commit()
     db.refresh(cliente)
-    return ClienteOut.model_validate(cliente)
+    return _map_cliente_out(cliente)
 
 
 @router.get("/{cliente_id}/resumen", response_model=ResumenMensualOut)

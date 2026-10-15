@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import Base, SessionLocal, engine
-from app.routers import auth, clientes, movimientos
+from app.routers import auth, clientes, movimientos, productos
 from app.seed import seed_database
 
 
@@ -59,6 +59,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api")
 app.include_router(clientes.router, prefix="/api")
 app.include_router(movimientos.router, prefix="/api")
+app.include_router(productos.router, prefix="/api")
 
 
 @app.get("/api/health", tags=["Salud"])

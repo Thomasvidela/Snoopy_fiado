@@ -1,11 +1,12 @@
 import React from 'react';
-import { Store, UserCheck, RefreshCw, UserPlus, Users } from 'lucide-react';
+import { Store, UserCheck, RefreshCw, UserPlus, Users, Package } from 'lucide-react';
 import { Operador } from '../types';
 
 interface NavbarProps {
   currentOperator: Operador | null;
   onSwitchOperator: () => void;
   onManageOperators: () => void;
+  onManageProducts: () => void;
   onNewClient: () => void;
 }
 
@@ -13,6 +14,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   currentOperator,
   onSwitchOperator,
   onManageOperators,
+  onManageProducts,
   onNewClient,
 }) => {
   return (
@@ -38,6 +40,16 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Actions & Operator */}
         <div className="flex items-center gap-2 sm:gap-3">
+          {/* Manage Products Button */}
+          <button
+            onClick={onManageProducts}
+            title="Administrar Productos Fijos (Garrafas, etc.)"
+            className="flex items-center gap-1.5 px-2.5 py-2 rounded-lg bg-slate-700/80 hover:bg-slate-700 border border-slate-600/70 text-slate-300 hover:text-white transition active:scale-95 text-xs font-medium"
+          >
+            <Package className="w-4 h-4 text-amber-400" />
+            <span className="hidden md:inline">Productos</span>
+          </button>
+
           {/* Manage Operators Button */}
           <button
             onClick={onManageOperators}

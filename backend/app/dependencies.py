@@ -87,3 +87,13 @@ def get_current_user(
         )
 
     return usuario
+
+
+def get_current_admin_user(operador: Usuario = Depends(get_current_user)) -> Usuario:
+    """Verifica que el operador actual tenga rol de Administrador."""
+    if not operador.es_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acceso denegado: Se requieren permisos de administrador para esta acción."
+        )
+    return operador

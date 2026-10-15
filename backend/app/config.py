@@ -9,6 +9,10 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 129600  # 90 días para operadores móviles
     STATIC_DIR: Optional[str] = None
+    ENVIRONMENT: str = "production"
+    MAX_LOGIN_ATTEMPTS: int = 5
+    LOCKOUT_MINUTES: int = 15
+    STORE_ACCESS_KEY: Optional[str] = None
     CORS_ORIGINS: List[str] = ["*"]
 
     model_config = SettingsConfigDict(

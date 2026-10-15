@@ -260,3 +260,37 @@ def test_exportar_excel(client):
     wb_mes = openpyxl.load_workbook(io.BytesIO(resp_mes.content))
     ws_mes = wb_mes["Movimientos"]
     assert "Octubre 2026" in ws_mes["E4"].value
+
+
+def test_seguridad_rate_limiting_y_headers(client):
+    # 1. Cabeceras de seguridad HTTP
+    resp_health = client.get("/api/health")
+    assert resp_health.status_code == 200
+    assert resp_health.headers.get("x-frame-options") == "DENY"
+    assert resp_health.headers.get("x-content-type-options") == "nosniff"
+
+    # 2. Docs deshabilitados en producción
+    resp_docs = client.get("/docs")
+    assert resp_docs.status_code == 404
+
+    # 3. Intentos de fuerza bruta y bloqueo temporal (HTTP 429)
+    admin = client.get("/api/auth/operadores").json()[0]
+
+    # Ejecutar 5 intentos fallidos
+    for i in range(5):
+        resp_fail = client.post(
+            "/api/auth/login",
+            json={"usuario_id": admin["id"], "pin": f"000{i}"},
+            headers={"cf-connecting-ip": "203.0.113.50"}
+        )
+        assert resp_fail.status_code in (401, 429)
+
+    # El 6to intento debe ser bloqueado con 429 Too Many Requests
+    resp_lockout = client.post(
+        "/api/auth/login",
+        json={"usuario_id": admin["id"], "pin": "1111"},
+        headers={"cf-connecting-ip": "203.0.113.50"}
+    )
+    assert resp_lockout.status_code == 429
+    assert "bloqueado" in resp_lockout.json()["detail"].lower()
+

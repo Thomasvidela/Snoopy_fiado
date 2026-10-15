@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { User, Lock, Delete, ArrowLeft, AlertCircle } from 'lucide-react';
 import { Operador } from '../types';
 import { api, authStorage } from '../api/client';
+import { hapticTap, hapticSuccess, hapticError } from '../utils/haptics';
 
 interface OperatorPinModalProps {
   isOpen: boolean;
@@ -61,6 +62,7 @@ export const OperatorPinModal: React.FC<OperatorPinModalProps> = ({
   if (!isOpen) return null;
 
   const handleDigit = (digit: string) => {
+    hapticTap(25);
     if (pin.length < 4) {
       const newPin = pin + digit;
       setPin(newPin);
@@ -72,11 +74,13 @@ export const OperatorPinModal: React.FC<OperatorPinModalProps> = ({
   };
 
   const handleDelete = () => {
+    hapticTap(35);
     setPin((prev) => prev.slice(0, -1));
     setError(null);
   };
 
   const handleClear = () => {
+    hapticTap(40);
     setPin('');
     setError(null);
   };
@@ -87,10 +91,12 @@ export const OperatorPinModal: React.FC<OperatorPinModalProps> = ({
     setError(null);
     try {
       const res = await api.loginPin(selectedOperador.id, enteredPin);
+      hapticSuccess();
       authStorage.setToken(res.access_token);
       authStorage.setOperator(res.operador);
       onSuccess(res.operador);
     } catch (err: any) {
+      hapticError();
       setError(err.message || 'PIN incorrecto');
       setPin('');
     } finally {

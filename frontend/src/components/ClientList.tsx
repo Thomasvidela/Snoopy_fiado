@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Search, Phone, Clock, X } from 'lucide-react';
 import { Cliente } from '../types';
 import { formatCurrency, timeAgo, normalizeArgentinePhone } from '../utils/format';
+import { hapticTap } from '../utils/haptics';
 
 interface ClientListProps {
   clientes: Cliente[];
@@ -145,7 +146,10 @@ export const ClientList: React.FC<ClientListProps> = ({
             return (
               <button
                 key={cliente.id}
-                onClick={() => onSelectCliente(cliente)}
+                onClick={() => {
+                  hapticTap(15);
+                  onSelectCliente(cliente);
+                }}
                 className={`w-full text-left p-3 rounded-xl transition flex items-center justify-between gap-3 ${
                   isSelected
                     ? 'bg-emerald-950/40 border border-emerald-500/40 shadow-sm'

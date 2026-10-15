@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { PlusCircle, CheckCircle2, X, AlertCircle } from 'lucide-react';
 import { Cliente, MovimientoCreatePayload } from '../types';
 import { formatCurrency } from '../utils/format';
+import { hapticTap, hapticSuccess, hapticError } from '../utils/haptics';
 
 interface MovementModalProps {
   isOpen: boolean;
@@ -44,16 +45,17 @@ export const MovementModal: React.FC<MovementModalProps> = ({
   if (!isOpen || !cliente) return null;
 
   const handleAddPreset = (val: number) => {
+    hapticTap(20);
     const current = parseFloat(monto || '0');
     setMonto((current + val).toString());
     setError(null);
   };
 
-
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const parsedMonto = parseFloat(monto);
     if (isNaN(parsedMonto) || parsedMonto <= 0) {
+      hapticError();
       setError('Ingrese un monto válido mayor a 0');
       return;
     }
@@ -66,8 +68,10 @@ export const MovementModal: React.FC<MovementModalProps> = ({
         monto: parsedMonto.toFixed(2),
         nota: nota.trim() || undefined,
       });
+      hapticSuccess();
       onClose();
     } catch (err: any) {
+      hapticError();
       setError(err.message || 'Error al asentar el movimiento');
     } finally {
       setLoading(false);

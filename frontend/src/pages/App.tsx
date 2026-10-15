@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { Wifi, WifiOff } from 'lucide-react';
 import { Navbar } from '../components/Navbar';
 import { ClientList } from '../components/ClientList';
 import { ClientDetail } from '../components/ClientDetail';
@@ -21,6 +22,10 @@ export const App: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [loadingClientes, setLoadingClientes] = useState<boolean>(false);
   const [loadingMovimientos, setLoadingMovimientos] = useState<boolean>(false);
+
+  // Network online/offline status
+  const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  const [showBackOnlineToast, setShowBackOnlineToast] = useState<boolean>(false);
 
   // Modals state
   const [movementModalOpen, setMovementModalOpen] = useState<boolean>(false);
@@ -90,6 +95,27 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('auth:expired', handleAuthExpired);
   }, []);
 
+  // Listen to network status changes
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      setShowBackOnlineToast(true);
+      const timer = setTimeout(() => setShowBackOnlineToast(false), 3500);
+      return () => clearTimeout(timer);
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
   // Selection handler
   const handleSelectCliente = (cliente: Cliente) => {
     setSelectedCliente(cliente);
@@ -133,6 +159,20 @@ export const App: React.FC = () => {
         onManageOperators={() => setManageOperatorsOpen(true)}
         onNewClient={() => setNewClientModalOpen(true)}
       />
+
+      {/* Offline / Online Network Status Banner */}
+      {!isOnline && (
+        <div className="bg-amber-600/95 text-white text-xs py-1.5 px-4 text-center font-medium flex items-center justify-center gap-2 shadow-sm animate-pulse z-20">
+          <WifiOff className="w-4 h-4 shrink-0" />
+          <span>Sin conexión a internet. Verifique su red Wi-Fi o datos móviles.</span>
+        </div>
+      )}
+      {showBackOnlineToast && (
+        <div className="bg-emerald-600 text-white text-xs py-1.5 px-4 text-center font-medium flex items-center justify-center gap-2 shadow-sm z-20 transition-all animate-in fade-in">
+          <Wifi className="w-4 h-4 shrink-0" />
+          <span>Conexión restablecida con éxito</span>
+        </div>
+      )}
 
       {/* Main Content Area */}
       <main className="flex-1 flex overflow-hidden">

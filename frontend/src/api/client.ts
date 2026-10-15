@@ -12,6 +12,22 @@ import {
 
 const TOKEN_KEY = 'fiados_auth_token';
 const OPERATOR_KEY = 'fiados_current_operator';
+const STORE_KEY = 'snoopy_store_key';
+
+export const storeAuth = {
+  getStoreKey(): string | null {
+    return localStorage.getItem(STORE_KEY);
+  },
+  setStoreKey(key: string): void {
+    localStorage.setItem(STORE_KEY, key);
+  },
+  isAuthorized(): boolean {
+    return !!localStorage.getItem(STORE_KEY);
+  },
+  clear(): void {
+    localStorage.removeItem(STORE_KEY);
+  }
+};
 
 export const authStorage = {
   getToken(): string | null {
@@ -43,6 +59,7 @@ export const authStorage = {
 
 async function apiRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const token = authStorage.getToken();
+  const storeKey = storeAuth.getStoreKey();
   const headers = new Headers(options.headers || {});
   
   if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
@@ -51,6 +68,10 @@ async function apiRequest<T>(endpoint: string, options: RequestInit = {}): Promi
   
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  if (storeKey) {
+    headers.set('X-Store-Key', storeKey);
   }
 
   const response = await fetch(`/api${endpoint}`, {
@@ -70,8 +91,13 @@ async function apiRequest<T>(endpoint: string, options: RequestInit = {}): Promi
     }
 
     if (response.status === 401) {
-      authStorage.clear();
-      window.dispatchEvent(new CustomEvent('auth:expired'));
+      if (errorMsg.includes('Dispositivo no autorizado')) {
+        storeAuth.clear();
+        window.dispatchEvent(new CustomEvent('store:unauthorized'));
+      } else {
+        authStorage.clear();
+        window.dispatchEvent(new CustomEvent('auth:expired'));
+      }
     }
 
     throw new Error(errorMsg);
@@ -81,7 +107,12 @@ async function apiRequest<T>(endpoint: string, options: RequestInit = {}): Promi
 }
 
 export const api = {
-  // Autenticación y Operadores
+  // Autenticación de Comercio y Operadores
+  verificarClaveLocal: (clave: string) =>
+    apiRequest<{ ok: boolean; mensaje: string }>('/auth/verificar-clave-local', {
+      method: 'POST',
+      body: JSON.stringify({ clave }),
+    }),
   getOperadores: (incluirInactivos: boolean = false) =>
     apiRequest<Operador[]>(`/auth/operadores${incluirInactivos ? '?incluir_inactivos=true' : ''}`),
   createOperador: (payload: OperadorCreatePayload) =>

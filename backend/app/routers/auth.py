@@ -15,7 +15,14 @@ from app.dependencies import (
     verify_pin,
 )
 from app.models import Movimiento, Usuario
-from app.schemas import LoginPinRequest, OperadorCreate, OperadorOut, OperadorUpdate, TokenResponse
+from app.schemas import (
+    ClaveLocalRequest,
+    LoginPinRequest,
+    OperadorCreate,
+    OperadorOut,
+    OperadorUpdate,
+    TokenResponse,
+)
 
 router = APIRouter(prefix="/auth", tags=["Autenticación"])
 
@@ -93,12 +100,50 @@ def get_client_ip(request: Request) -> str:
     return "unknown"
 
 
+@router.post("/verificar-clave-local")
+def verificar_clave_local(payload: ClaveLocalRequest, request: Request):
+    """Verifica la clave maestra del comercio para autorizar el dispositivo."""
+    client_ip = get_client_ip(request)
+    ip_key = f"storekey_ip_{client_ip}"
+
+    # Rate limiting para evitar fuerza bruta contra la clave del local
+    remaining = login_limiter.get_lockout_remaining(ip_key)
+    if remaining is not None:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Demasiados intentos incorrectos de clave del local. Intente nuevamente en {remaining} minuto(s)."
+        )
+
+    if payload.clave.strip() != settings.STORE_ACCESS_KEY:
+        login_limiter.record_failure(ip_key)
+        intentos = login_limiter.get_remaining_attempts(ip_key)
+        if intentos > 0:
+            msg = f"Clave del comercio incorrecta. Le quedan {intentos} intento(s)."
+        else:
+            msg = f"Clave incorrecta. Acceso bloqueado por {settings.LOCKOUT_MINUTES} minutos."
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=msg
+        )
+
+    login_limiter.record_success(ip_key)
+    return {"ok": True, "mensaje": "Dispositivo autorizado para Despensa Snoopy."}
+
+
 @router.get("/operadores", response_model=List[OperadorOut])
 def listar_operadores(
+    request: Request,
     incluir_inactivos: bool = Query(False, description="Incluir operadores inactivos"),
     db: Session = Depends(get_db)
 ):
-    """Lista los operadores. Por defecto retorna solo los activos para el selector de login."""
+    """Lista los operadores. Requiere que el dispositivo envíe la clave del comercio autorizada."""
+    store_key = request.headers.get("x-store-key")
+    if settings.STORE_ACCESS_KEY and store_key != settings.STORE_ACCESS_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Dispositivo no autorizado. Se requiere la clave de acceso del comercio."
+        )
+
     query = db.query(Usuario)
     if not incluir_inactivos:
         query = query.filter(Usuario.activo.is_(True))

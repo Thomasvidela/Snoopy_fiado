@@ -43,8 +43,20 @@ def client():
 
 
 def test_auth_operadores_y_login(client):
-    # 1. Listar operadores (inicialmente solo Administrador sembrado)
-    resp = client.get("/api/auth/operadores")
+    # 1. Sin clave del local, el listado de operadores debe ser denegado (401)
+    resp_sin_clave = client.get("/api/auth/operadores")
+    assert resp_sin_clave.status_code == 401
+    assert "Dispositivo no autorizado" in resp_sin_clave.json()["detail"]
+
+    # 2. Verificar clave del comercio incorrecta vs correcta
+    resp_bad_key = client.post("/api/auth/verificar-clave-local", json={"clave": "clave_incorrecta"})
+    assert resp_bad_key.status_code == 401
+
+    resp_good_key = client.post("/api/auth/verificar-clave-local", json={"clave": "Despensa.Snoopy1980"})
+    assert resp_good_key.status_code == 200
+
+    # 3. Listar operadores con clave del local
+    resp = client.get("/api/auth/operadores", headers={"x-store-key": "Despensa.Snoopy1980"})
     assert resp.status_code == 200
     operadores = resp.json()
     assert len(operadores) == 1
@@ -52,7 +64,7 @@ def test_auth_operadores_y_login(client):
     assert admin["nombre"] == "Administrador"
     assert admin["es_admin"] is True
 
-    # 2. Login con PIN incorrecto
+    # 4. Login con PIN incorrecto
     resp_fail = client.post("/api/auth/login", json={"usuario_id": admin["id"], "pin": "9999"})
     assert resp_fail.status_code == 401
 
@@ -94,7 +106,7 @@ def test_auth_operadores_y_login(client):
 
 def test_flujo_completo_ledger_y_anulacion(client):
     # Login como Administrador (PIN 1111)
-    operadores = client.get("/api/auth/operadores").json()
+    operadores = client.get("/api/auth/operadores", headers={"x-store-key": "Despensa.Snoopy1980"}).json()
     admin = next(o for o in operadores if o["nombre"] == "Administrador")
     token = client.post("/api/auth/login", json={"usuario_id": admin["id"], "pin": "1111"}).json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
@@ -274,7 +286,7 @@ def test_seguridad_rate_limiting_y_headers(client):
     assert resp_docs.status_code == 404
 
     # 3. Intentos de fuerza bruta y bloqueo temporal (HTTP 429)
-    admin = client.get("/api/auth/operadores").json()[0]
+    admin = client.get("/api/auth/operadores", headers={"x-store-key": "Despensa.Snoopy1980"}).json()[0]
 
     # Ejecutar 5 intentos fallidos
     for i in range(5):

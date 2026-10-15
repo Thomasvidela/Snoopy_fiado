@@ -8,12 +8,14 @@ import { MovementModal } from '../components/MovementModal';
 import { WhatsAppModal } from '../components/WhatsAppModal';
 import { NewClientModal } from '../components/NewClientModal';
 import { ManageOperatorsModal } from '../components/ManageOperatorsModal';
+import { StoreGateModal } from '../components/StoreGateModal';
 import { Cliente, Movimiento, MovimientoCreatePayload, Operador } from '../types';
-import { api, authStorage } from '../api/client';
+import { api, authStorage, storeAuth } from '../api/client';
 
 export const App: React.FC = () => {
+  const [storeGateOpen, setStoreGateOpen] = useState<boolean>(!storeAuth.isAuthorized());
   const [currentOperator, setCurrentOperator] = useState<Operador | null>(authStorage.getOperator());
-  const [pinModalOpen, setPinModalOpen] = useState<boolean>(!authStorage.getToken());
+  const [pinModalOpen, setPinModalOpen] = useState<boolean>(!authStorage.getToken() && storeAuth.isAuthorized());
   
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [selectedCliente, setSelectedCliente] = useState<Cliente | null>(null);
@@ -39,6 +41,7 @@ export const App: React.FC = () => {
 
   // Load clients
   const fetchClientes = useCallback(async (query?: string) => {
+    if (!storeAuth.isAuthorized()) return;
     setLoadingClientes(true);
     try {
       const res = await api.getClientes(query);
@@ -58,11 +61,12 @@ export const App: React.FC = () => {
 
   // Debounced search
   useEffect(() => {
+    if (!storeAuth.isAuthorized()) return;
     const timer = setTimeout(() => {
       fetchClientes(searchQuery);
     }, 250);
     return () => clearTimeout(timer);
-  }, [searchQuery, fetchClientes]);
+  }, [searchQuery, fetchClientes, storeGateOpen]);
 
   // Load movements when selected client changes
   const fetchMovimientos = useCallback(async (clienteId: number) => {
@@ -89,10 +93,21 @@ export const App: React.FC = () => {
   useEffect(() => {
     const handleAuthExpired = () => {
       setCurrentOperator(null);
-      setPinModalOpen(true);
+      if (storeAuth.isAuthorized()) {
+        setPinModalOpen(true);
+      }
     };
+    const handleStoreUnauthorized = () => {
+      setStoreGateOpen(true);
+      setPinModalOpen(false);
+    };
+
     window.addEventListener('auth:expired', handleAuthExpired);
-    return () => window.removeEventListener('auth:expired', handleAuthExpired);
+    window.addEventListener('store:unauthorized', handleStoreUnauthorized);
+    return () => {
+      window.removeEventListener('auth:expired', handleAuthExpired);
+      window.removeEventListener('store:unauthorized', handleStoreUnauthorized);
+    };
   }, []);
 
   // Listen to network status changes
@@ -271,6 +286,16 @@ export const App: React.FC = () => {
           fetchClientes('');
           setSelectedCliente(nuevo);
           setMobileView('detail');
+        }}
+      />
+
+      {/* Store Gatekeeper Modal (Clave Maestra del Comercio) */}
+      <StoreGateModal
+        isOpen={storeGateOpen}
+        onSuccess={() => {
+          setStoreGateOpen(false);
+          setPinModalOpen(true);
+          fetchClientes();
         }}
       />
     </div>

@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "production"
     MAX_LOGIN_ATTEMPTS: int = 5
     LOCKOUT_MINUTES: int = 15
-    STORE_ACCESS_KEY: Optional[str] = None
+    STORE_ACCESS_KEY: str = "Despensa.Snoopy1980"
     CORS_ORIGINS: List[str] = ["*"]
 
     model_config = SettingsConfigDict(

@@ -27,6 +27,10 @@ class OperadorUpdate(BaseModel):
     es_admin: Optional[bool] = None
 
 
+class ClaveLocalRequest(BaseModel):
+    clave: str = Field(..., min_length=1, max_length=100)
+
+
 class LoginPinRequest(BaseModel):
     usuario_id: int
     pin: str = Field(..., min_length=4, max_length=10)

@@ -256,6 +256,10 @@ def test_flujo_completo_ledger_y_anulacion(client):
     assert "Carlos Alberto Tevez" in resumen["texto_whatsapp"]
     assert "El Jugador del Pueblo" in resumen["texto_whatsapp"]
     assert "$5.000,00" in resumen["texto_whatsapp"]
+    # Las anulaciones no deben aparecer en el mensaje de WhatsApp enviado al cliente
+    assert "ANULADO" not in resumen["texto_whatsapp"]
+    assert "ANULACION" not in resumen["texto_whatsapp"]
+    assert "2.500" not in resumen["texto_whatsapp"]
 
 
 def test_spa_static_serving(client):

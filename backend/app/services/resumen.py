@@ -145,18 +145,17 @@ class ResumenService:
             )
             movimientos_out.append(mov_out)
 
-            # Generar línea para WhatsApp
+            # Generar línea para WhatsApp (se excluyen movimientos anulados y contra-asientos de anulación)
+            if m.anulado or m.tipo in (TipoMovimiento.ANULACION_CARGO, TipoMovimiento.ANULACION_PAGO):
+                continue
+
             fecha_str = m.fecha_creacion.strftime("%d/%m")
-            if m.anulado:
-                lineas_detalle.append(f"- ~{fecha_str}: {formatear_pesos(m.monto)} ({m.tipo.value} - ANULADO)~")
-            elif m.tipo == TipoMovimiento.CARGO:
+            if m.tipo == TipoMovimiento.CARGO:
                 nota_txt = f" - {m.nota}" if m.nota else ""
                 lineas_detalle.append(f"- {fecha_str}: {formatear_pesos(m.monto)} (Compra{nota_txt})")
             elif m.tipo == TipoMovimiento.PAGO:
                 nota_txt = f" - {m.nota}" if m.nota else ""
                 lineas_detalle.append(f"- {fecha_str}: -{formatear_pesos(m.monto)} (Pago recibido{nota_txt})")
-            elif m.tipo in (TipoMovimiento.ANULACION_CARGO, TipoMovimiento.ANULACION_PAGO):
-                lineas_detalle.append(f"- {fecha_str}: {m.tipo.value} ({formatear_pesos(m.monto)})")
 
         # Artículos dinámicos pendientes de cotización (ej: garrafas de gas)
         articulos_pendientes_db = (

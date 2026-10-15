@@ -1,0 +1,86 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fiados_app
+    restart: unless-stopped
+    ports:
+      # Acceso LAN en el local comercial (permite operar offline si se cae internet)
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres_fiados_2026}@db:5432/${POSTGRES_DB:-fiados}
+      - JWT_SECRET=${JWT_SECRET:-cambiar_esta_clave_super_secreta_jwt_en_produccion}
+      - JWT_ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-129600}
+      - STATIC_DIR=/app/frontend/dist
+      - TZ=America/Argentina/Buenos_Aires
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - fiados_net
+
+  db:
+    image: postgres:16-alpine
+    container_name: fiados_db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres_fiados_2026}
+      - POSTGRES_DB=${POSTGRES_DB:-fiados}
+      - TZ=America/Argentina/Buenos_Aires
+      - PGTZ=America/Argentina/Buenos_Aires
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-fiados}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - fiados_net
+
+  # Sidecar de Backups automáticos diarios (pg_dump)
+  backups:
+    image: prodrigestivill/postgres-backup-local:16-alpine
+    container_name: fiados_backups
+    restart: unless-stopped
+    environment:
+      - POSTGRES_HOST=db
+      - POSTGRES_DB=${POSTGRES_DB:-fiados}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres_fiados_2026}
+      - TZ=America/Argentina/Buenos_Aires
+      - SCHEDULE=@daily
+      - BACKUP_KEEP_DAYS=14
+      - BACKUP_KEEP_WEEKS=4
+      - BACKUP_KEEP_MONTHS=6
+      - BACKUP_DIR=/backups
+    volumes:
+      - ./backups:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - fiados_net
+
+  # Sidecar de Acceso Remoto Seguro (Cloudflare Tunnel) para datos móviles 4G
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: fiados_tunnel
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:-}
+    networks:
+      - fiados_net
+    profiles:
+      - tunnel
+
+networks:
+  fiados_net:
+    driver: bridge
+
+volumes:
+  postgres_data:

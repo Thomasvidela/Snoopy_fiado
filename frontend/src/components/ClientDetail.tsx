@@ -5,7 +5,6 @@ import {
   PlusCircle,
   CheckCircle2,
   Calendar,
-  Tag,
   MessageCircle,
   FileSpreadsheet,
   UserX,
@@ -18,11 +17,14 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
+  Search,
+  X,
 } from 'lucide-react';
 import { Cliente, Movimiento, ClienteArticulo } from '../types';
 import { MovementList } from './MovementList';
 import { EditClientModal } from './EditClientModal';
 import { AddArticleModal } from './AddArticleModal';
+import { PostOperationInfo } from './PostOperationModal';
 import { formatCurrency, normalizeArgentinePhone, getWhatsAppCleanNumber } from '../utils/format';
 import { hapticTap, hapticSuccess, hapticError } from '../utils/haptics';
 import { api } from '../api/client';
@@ -32,12 +34,18 @@ interface ClientDetailProps {
   movimientos: Movimiento[];
   loadingMovimientos: boolean;
   onBack?: () => void;
+  onCloseCliente?: () => void;
   onOpenMovementModal: (tipo: 'CARGO' | 'PAGO') => void;
   onOpenWhatsAppModal: () => void;
   onAnularMovimiento: (movimientoId: number) => Promise<void>;
   onToggleActivo?: (clienteId: number) => Promise<void>;
   onUpdateCliente?: (clienteActualizado: Cliente) => void;
-  onRefreshClient?: () => void;
+  onRefreshClient?: () => Promise<void> | void;
+  onOperationFinished?: (info: PostOperationInfo) => void;
+  clientes?: Cliente[];
+  searchQuery?: string;
+  onSearchChange?: (query: string) => void;
+  onSelectCliente?: (cliente: Cliente) => void;
 }
 
 export const ClientDetail: React.FC<ClientDetailProps> = ({
@@ -45,12 +53,18 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
   movimientos,
   loadingMovimientos,
   onBack,
+  onCloseCliente,
   onOpenMovementModal,
   onOpenWhatsAppModal,
   onAnularMovimiento,
   onToggleActivo,
   onUpdateCliente,
   onRefreshClient,
+  onOperationFinished,
+  clientes = [],
+  searchQuery = '',
+  onSearchChange,
+  onSelectCliente,
 }) => {
   const [exportandoExcel, setExportandoExcel] = useState<boolean>(false);
   const [togglingActivo, setTogglingActivo] = useState<boolean>(false);
@@ -132,15 +146,85 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
   }, [cliente?.id, cargarArticulos]);
 
   if (!cliente) {
+    const isSearching = searchQuery.trim().length > 0;
     return (
-      <div className="h-full flex flex-col items-center justify-center p-8 text-center text-slate-400">
-        <div className="w-16 h-16 rounded-2xl bg-slate-800 flex items-center justify-center text-slate-500 mb-3 border border-slate-700">
-          <Tag className="w-8 h-8" />
+      <div className="h-full flex flex-col items-center justify-center p-6 sm:p-10 text-center bg-slate-900 overflow-y-auto">
+        <div className="w-full max-w-md bg-slate-800/70 border border-slate-700/80 rounded-2xl p-6 shadow-xl">
+          <div className="w-14 h-14 rounded-2xl bg-emerald-500/15 flex items-center justify-center text-emerald-400 mx-auto mb-3 border border-emerald-500/30">
+            <Search className="w-7 h-7" />
+          </div>
+          <h3 className="text-base sm:text-lg font-extrabold text-white">
+            Paso 1: Buscar y seleccionar cliente
+          </h3>
+          <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
+            Por seguridad, primero busque al cliente por su <strong className="text-slate-200">nombre o apodo</strong> antes de registrar un fiado, garrafa o cobro.
+          </p>
+
+          {onSearchChange && (
+            <div className="mt-4 relative text-left">
+              <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-emerald-400" />
+              <input
+                type="text"
+                placeholder="Escriba el nombre o apodo del cliente..."
+                value={searchQuery}
+                onChange={(e) => onSearchChange(e.target.value)}
+                className="w-full pl-10 pr-9 py-3 bg-slate-900 border border-emerald-500/60 rounded-xl text-sm text-white placeholder-slate-400 focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/40 transition"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => onSearchChange('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+          )}
+
+          {isSearching && onSelectCliente && (
+            <div className="mt-3 text-left max-h-60 overflow-y-auto divide-y divide-slate-700/60 rounded-xl border border-slate-700 bg-slate-900/90">
+              {clientes.length === 0 ? (
+                <div className="p-4 text-center text-xs text-slate-400">
+                  No se encontraron clientes para "{searchQuery}"
+                </div>
+              ) : (
+                clientes.slice(0, 8).map((c) => {
+                  const s = parseFloat(c.saldo_total || c.saldo_actual);
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => {
+                        hapticTap(15);
+                        onSelectCliente(c);
+                      }}
+                      className="w-full px-3.5 py-2.5 hover:bg-emerald-950/40 flex items-center justify-between gap-2 transition text-left"
+                    >
+                      <div className="min-w-0">
+                        <span className="text-sm font-bold text-white block truncate">
+                          {c.nombre}
+                          {c.apodo && (
+                            <span className="text-xs text-amber-400 font-medium ml-1.5">
+                              "{c.apodo}"
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                      <span
+                        className={`text-xs font-bold shrink-0 ${
+                          s > 0 ? 'text-rose-400' : s < 0 ? 'text-cyan-400' : 'text-emerald-400'
+                        }`}
+                      >
+                        {formatCurrency(c.saldo_total || c.saldo_actual)}
+                      </span>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          )}
         </div>
-        <h3 className="text-base font-semibold text-slate-200">Ningún cliente seleccionado</h3>
-        <p className="text-xs text-slate-400 mt-1 max-w-xs">
-          Seleccione un cliente de la lista para ver su cuenta corriente o asentar compras fiadas.
-        </p>
       </div>
     );
   }
@@ -167,7 +251,15 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
       await api.liquidarClienteArticulos(cliente.id, { articulo_ids: [art.id] });
       hapticSuccess();
       await cargarArticulos();
-      if (onRefreshClient) onRefreshClient();
+      if (onRefreshClient) await onRefreshClient();
+      if (onOperationFinished) {
+        onOperationFinished({
+          titulo: '¡Producto sumado a la libreta!',
+          detalle: `Liquidación: ${art.cantidad} ${art.producto_unidad} de ${art.producto_nombre}`,
+          monto: art.subtotal_actual,
+          esCargo: true,
+        });
+      }
     } catch (err: any) {
       hapticError();
       alert(err.message || 'Error al liquidar producto');
@@ -178,7 +270,9 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
 
   const handleLiquidarTodos = async () => {
     if (!cliente || articulosPendientes.length === 0) return;
-    const confirmMsg = `¿Cerrar cuenta y asentar todos los productos (${articulosPendientes.length}) a la libreta por un total de ${formatCurrency(totalArticulosPendientes)} a cotización actual?`;
+    const count = articulosPendientes.length;
+    const montoTotal = totalArticulosPendientes.toFixed(2);
+    const confirmMsg = `¿Cerrar cuenta y asentar todos los productos (${count}) a la libreta por un total de ${formatCurrency(totalArticulosPendientes)} a cotización actual?`;
     if (!window.confirm(confirmMsg)) return;
 
     setLiquidando(true);
@@ -188,7 +282,15 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
       });
       hapticSuccess();
       await cargarArticulos();
-      if (onRefreshClient) onRefreshClient();
+      if (onRefreshClient) await onRefreshClient();
+      if (onOperationFinished) {
+        onOperationFinished({
+          titulo: '¡Productos sumados a la libreta!',
+          detalle: `Liquidación de ${count} producto(s) a cotización del día`,
+          monto: montoTotal,
+          esCargo: true,
+        });
+      }
     } catch (err: any) {
       hapticError();
       alert(err.message || 'Error al liquidar productos');
@@ -207,7 +309,7 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
       await api.cancelarClienteArticulo(art.id);
       hapticSuccess();
       await cargarArticulos();
-      if (onRefreshClient) onRefreshClient();
+      if (onRefreshClient) await onRefreshClient();
     } catch (err: any) {
       hapticError();
       alert(err.message || 'Error al cancelar producto');
@@ -222,12 +324,21 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
       <div className="p-4 sm:p-5 border-b border-slate-800 bg-slate-850/60 sticky top-0 z-10 backdrop-blur-md">
         <div className="flex items-center justify-between gap-3 mb-3">
           <div className="flex items-center gap-3">
-            {onBack && (
+            {(onCloseCliente || onBack) && (
               <button
-                onClick={onBack}
-                className="md:hidden p-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white"
+                onClick={() => {
+                  hapticTap(15);
+                  if (onCloseCliente) {
+                    onCloseCliente();
+                  } else if (onBack) {
+                    onBack();
+                  }
+                }}
+                title="Cerrar ficha de este cliente y volver al buscador"
+                className="px-2.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white flex items-center gap-1.5 text-xs font-semibold transition active:scale-95 shrink-0"
               >
-                <ArrowLeft className="w-5 h-5" />
+                <ArrowLeft className="w-4 h-4 text-emerald-400" />
+                <span className="hidden sm:inline">Cambiar cliente</span>
               </button>
             )}
 
@@ -654,9 +765,19 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
         isOpen={addArticleModalOpen}
         cliente={cliente}
         onClose={() => setAddArticleModalOpen(false)}
-        onSuccess={() => {
-          cargarArticulos();
-          if (onRefreshClient) onRefreshClient();
+        onSuccess={async (art) => {
+          await cargarArticulos();
+          if (onRefreshClient) await onRefreshClient();
+          if (onOperationFinished) {
+            onOperationFinished({
+              titulo: '¡Producto anotado con éxito!',
+              detalle: `${art.cantidad} ${art.producto_unidad} de ${art.producto_nombre}${
+                art.nota ? ` (${art.nota})` : ''
+              }`,
+              monto: art.subtotal_actual,
+              esCargo: true,
+            });
+          }
         }}
       />
     </div>

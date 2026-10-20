@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Package, X, AlertCircle, Plus, Minus, Tag } from 'lucide-react';
-import { Cliente, Producto } from '../types';
+import { Cliente, Producto, ClienteArticulo } from '../types';
 import { api } from '../api/client';
 import { formatCurrency } from '../utils/format';
 import { hapticTap, hapticSuccess, hapticError } from '../utils/haptics';
@@ -9,7 +9,7 @@ interface AddArticleModalProps {
   isOpen: boolean;
   cliente: Cliente | null;
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (articulo: ClienteArticulo) => void;
 }
 
 export const AddArticleModal: React.FC<AddArticleModalProps> = ({
@@ -68,14 +68,14 @@ export const AddArticleModal: React.FC<AddArticleModalProps> = ({
     setGuardando(true);
     setError(null);
     try {
-      await api.createClienteArticulo(cliente.id, {
+      const created = await api.createClienteArticulo(cliente.id, {
         producto_id: selectedProductoId,
         cantidad: cantidad.toString(),
         nota: nota.trim() || undefined,
       });
       hapticSuccess();
-      onSuccess();
       onClose();
+      onSuccess(created);
     } catch (err: any) {
       hapticError();
       setError(err.message || 'Error al anotar producto');

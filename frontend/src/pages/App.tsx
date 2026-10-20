@@ -10,6 +10,7 @@ import { NewClientModal } from '../components/NewClientModal';
 import { ManageOperatorsModal } from '../components/ManageOperatorsModal';
 import { ManageProductsModal } from '../components/ManageProductsModal';
 import { StoreGateModal } from '../components/StoreGateModal';
+import { PostOperationModal, PostOperationInfo } from '../components/PostOperationModal';
 import { Cliente, Movimiento, MovimientoCreatePayload, Operador } from '../types';
 import { api, authStorage, storeAuth } from '../api/client';
 
@@ -37,6 +38,7 @@ export const App: React.FC = () => {
   const [newClientModalOpen, setNewClientModalOpen] = useState<boolean>(false);
   const [manageOperatorsOpen, setManageOperatorsOpen] = useState<boolean>(false);
   const [manageProductsOpen, setManageProductsOpen] = useState<boolean>(false);
+  const [postOpInfo, setPostOpInfo] = useState<PostOperationInfo | null>(null);
 
   // Mobile view state: 'list' or 'detail'
   const [mobileView, setMobileView] = useState<'list' | 'detail'>('list');
@@ -48,9 +50,10 @@ export const App: React.FC = () => {
     try {
       const res = await api.getClientes(query);
       setClientes(res.items);
-      // If a client was selected, update its reference
+      // Solo actualizar la referencia si ya había un cliente explícitamente seleccionado.
+      // Nunca seleccionar el primero automáticamente para obligar a buscar primero al cliente.
       setSelectedCliente((prev) => {
-        if (!prev) return res.items.length > 0 && window.innerWidth >= 768 ? res.items[0] : null;
+        if (!prev) return null;
         const updated = res.items.find((c) => c.id === prev.id);
         return updated || prev;
       });
@@ -140,6 +143,14 @@ export const App: React.FC = () => {
     setMobileView('detail');
   };
 
+  // Close current client and return to safe search state
+  const handleCloseCliente = useCallback(() => {
+    setSelectedCliente(null);
+    setSearchQuery('');
+    setMobileView('list');
+    setPostOpInfo(null);
+  }, []);
+
   // Create movement handler
   const handleCreateMovimiento = async (payload: MovimientoCreatePayload) => {
     if (!selectedCliente) return;
@@ -149,6 +160,21 @@ export const App: React.FC = () => {
       fetchClientes(searchQuery),
       fetchMovimientos(selectedCliente.id),
     ]);
+    try {
+      const fresh = await api.getCliente(selectedCliente.id);
+      setSelectedCliente(fresh);
+    } catch {
+      // ignore
+    }
+    const esCargo = payload.tipo === 'CARGO';
+    setPostOpInfo({
+      titulo: esCargo ? '¡Compra fiada registrada!' : '¡Pago registrado con éxito!',
+      detalle: `${esCargo ? 'Cargo en libreta' : 'Cobro / Entrega'}${
+        payload.nota ? ` (${payload.nota})` : ''
+      }`,
+      monto: payload.monto,
+      esCargo,
+    });
   };
 
   // Annul movement handler
@@ -243,7 +269,8 @@ export const App: React.FC = () => {
               cliente={selectedCliente}
               movimientos={movimientos}
               loadingMovimientos={loadingMovimientos}
-              onBack={() => setMobileView('list')}
+              onBack={handleCloseCliente}
+              onCloseCliente={handleCloseCliente}
               onOpenMovementModal={(tipo) => {
                 setMovementDefaultTipo(tipo);
                 setMovementModalOpen(true);
@@ -253,6 +280,11 @@ export const App: React.FC = () => {
               onToggleActivo={handleToggleClienteActivo}
               onUpdateCliente={handleUpdateCliente}
               onRefreshClient={handleRefreshSelectedCliente}
+              onOperationFinished={(info) => setPostOpInfo(info)}
+              clientes={clientes}
+              searchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
+              onSelectCliente={handleSelectCliente}
             />
           </div>
         </div>
@@ -295,6 +327,15 @@ export const App: React.FC = () => {
         defaultTipo={movementDefaultTipo}
         onClose={() => setMovementModalOpen(false)}
         onSubmit={handleCreateMovimiento}
+      />
+
+      {/* Post-Operation Confirmation Modal (¿Otra operación con el mismo cliente?) */}
+      <PostOperationModal
+        isOpen={Boolean(postOpInfo && selectedCliente)}
+        cliente={selectedCliente}
+        operationInfo={postOpInfo}
+        onContinueSameClient={() => setPostOpInfo(null)}
+        onFinishAndSearchNew={handleCloseCliente}
       />
 
       {/* WhatsApp Monthly Statement Modal */}

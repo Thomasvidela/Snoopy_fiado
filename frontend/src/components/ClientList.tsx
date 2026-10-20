@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Search, Phone, Clock, X } from 'lucide-react';
 import { Cliente } from '../types';
 import { formatCurrency, timeAgo, normalizeArgentinePhone } from '../utils/format';
@@ -22,6 +22,16 @@ export const ClientList: React.FC<ClientListProps> = ({
   searchQuery,
 }) => {
   const [filter, setFilter] = useState<'todos' | 'deudores' | 'aldia' | 'inactivos'>('todos');
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Cuando se deselecciona el cliente (ej. al terminar operación), enfocar automáticamente el buscador
+  useEffect(() => {
+    if (selectedClienteId === null) {
+      setTimeout(() => {
+        searchInputRef.current?.focus();
+      }, 60);
+    }
+  }, [selectedClienteId]);
 
   const inactivosCount = useMemo(() => {
     return clientes.filter((c) => !c.activo).length;
@@ -31,7 +41,7 @@ export const ClientList: React.FC<ClientListProps> = ({
   const filteredClientes = useMemo(() => {
     return clientes.filter((c) => {
       if (filter === 'inactivos') return !c.activo;
-      const saldo = parseFloat(c.saldo_actual);
+      const saldo = parseFloat(c.saldo_total || c.saldo_actual);
       if (filter === 'deudores') return saldo > 0 && c.activo;
       if (filter === 'aldia') return saldo <= 0 && c.activo;
       return true;
@@ -53,13 +63,22 @@ export const ClientList: React.FC<ClientListProps> = ({
       <div className="p-3 sm:p-4 border-b border-slate-800 space-y-3">
         {/* Instant Search Bar */}
         <div className="relative">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <Search
+            className={`w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 transition ${
+              selectedClienteId === null ? 'text-emerald-400' : 'text-slate-400'
+            }`}
+          />
           <input
+            ref={searchInputRef}
             type="text"
             placeholder="Buscar por nombre o apodo..."
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
-            className="w-full pl-9 pr-9 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition"
+            className={`w-full pl-9 pr-9 py-2.5 bg-slate-800 border rounded-xl text-sm text-white placeholder-slate-400 focus:outline-none transition ${
+              selectedClienteId === null
+                ? 'border-emerald-500/70 ring-1 ring-emerald-500/30 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/50'
+                : 'border-slate-700 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'
+            }`}
           />
           {searchQuery && (
             <button

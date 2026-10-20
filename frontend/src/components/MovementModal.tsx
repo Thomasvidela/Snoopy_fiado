@@ -96,17 +96,22 @@ export const MovementModal: React.FC<MovementModalProps> = ({
         </button>
 
         {/* Header with Client Info */}
-        <div className="mb-4">
-          <div className="flex items-center gap-2">
-            <h2 className="text-lg font-bold text-white">
+        <div className="mb-4 p-3 rounded-xl bg-slate-900/90 border border-emerald-500/30 pr-8">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 block">
+            Operando en la cuenta de:
+          </span>
+          <div className="flex items-center gap-2 flex-wrap mt-0.5">
+            <h2 className="text-lg font-extrabold text-white">
               {cliente.nombre}
             </h2>
             {cliente.apodo && (
-              <span className="text-xs text-amber-400 font-medium">"{cliente.apodo}"</span>
+              <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30 font-semibold">
+                "{cliente.apodo}"
+              </span>
             )}
           </div>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Saldo actual: <span className="font-semibold text-white">{formatCurrency(cliente.saldo_actual)}</span>
+          <p className="text-xs text-slate-400 mt-1">
+            Saldo en libreta: <span className="font-semibold text-white">{formatCurrency(cliente.saldo_actual)}</span>
           </p>
         </div>
 

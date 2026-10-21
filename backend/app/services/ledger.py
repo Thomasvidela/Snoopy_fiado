@@ -4,7 +4,14 @@ from typing import Optional
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session, Query
 
-from app.models import Cliente, Movimiento, TipoMovimiento, Usuario, ahora_argentina
+from app.models import (
+    Cliente,
+    Movimiento,
+    TipoMovimiento,
+    Usuario,
+    ahora_argentina,
+    obtener_periodo_activo_cliente,
+)
 from app.schemas import ClienteCreate, MovimientoCreate
 
 
@@ -59,14 +66,17 @@ class LedgerService:
                 detail="El saldo inicial no puede ser negativo."
             )
 
+        ahora = ahora_argentina()
+        periodo_inicial = ahora.strftime("%Y-%m")
         cliente = Cliente(
             nombre=datos.nombre.strip(),
             apodo=datos.apodo.strip() if datos.apodo else None,
             telefono=normalizar_telefono_argentina(datos.telefono),
             saldo_actual=Decimal("0.00"),
-            ultima_actividad=ahora_argentina(),
+            ultima_actividad=ahora,
             activo=True,
-            fecha_alta=ahora_argentina()
+            fecha_alta=ahora,
+            periodo_actual=periodo_inicial
         )
         db.add(cliente)
         db.flush()  # Obtiene cliente.id
@@ -79,8 +89,9 @@ class LedgerService:
                 monto=saldo_inicial,
                 saldo_resultante=saldo_inicial,
                 nota="Saldo inicial (migrado del fichero)",
+                periodo=periodo_inicial,
                 anulado=False,
-                fecha_creacion=ahora_argentina()
+                fecha_creacion=ahora
             )
             cliente.saldo_actual = saldo_inicial
             db.add(movimiento_inicial)
@@ -136,6 +147,11 @@ class LedgerService:
             nuevo_saldo = saldo_actual - monto
 
         ahora = ahora_argentina()
+        periodo_destino = (
+            datos.periodo.strip()
+            if getattr(datos, "periodo", None) and datos.periodo.strip()
+            else obtener_periodo_activo_cliente(cliente)
+        )
         movimiento = Movimiento(
             cliente_id=cliente.id,
             usuario_id=operador.id,
@@ -143,6 +159,7 @@ class LedgerService:
             monto=monto,
             saldo_resultante=nuevo_saldo,
             nota=datos.nota.strip() if datos.nota else None,
+            periodo=periodo_destino,
             anulado=False,
             fecha_creacion=ahora
         )
@@ -230,6 +247,7 @@ class LedgerService:
             monto=monto,
             saldo_resultante=nuevo_saldo,
             nota=nota_anulacion,
+            periodo=movimiento.periodo or obtener_periodo_activo_cliente(cliente),
             anulado=False,
             anula_movimiento_id=movimiento.id,
             fecha_creacion=ahora

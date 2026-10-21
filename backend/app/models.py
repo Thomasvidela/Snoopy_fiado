@@ -28,6 +28,34 @@ def ahora_argentina() -> datetime:
 utc_now = ahora_argentina
 
 
+def calcular_siguiente_periodo(periodo: str) -> str:
+    """Dado un período 'YYYY-MM', retorna el siguiente mes 'YYYY-MM'."""
+    try:
+        anio_str, mes_str = periodo.strip().split("-")
+        anio = int(anio_str)
+        mes = int(mes_str)
+        if mes >= 12:
+            return f"{anio + 1}-01"
+        return f"{anio}-{mes + 1:02d}"
+    except Exception:
+        ahora = ahora_argentina()
+        if ahora.month >= 12:
+            return f"{ahora.year + 1}-01"
+        return f"{ahora.year}-{ahora.month + 1:02d}"
+
+
+def obtener_periodo_activo_cliente(cliente: "Cliente") -> str:
+    """
+    Retorna el período contable activo ('YYYY-MM') del cliente.
+    Si el cliente cerró anticipadamente el mes en curso, su periodo_actual será posterior
+    al mes calendario y los nuevos movimientos se imputarán a ese nuevo mes.
+    """
+    mes_calendario = ahora_argentina().strftime("%Y-%m")
+    if getattr(cliente, "periodo_actual", None) and cliente.periodo_actual > mes_calendario:
+        return cliente.periodo_actual
+    return mes_calendario
+
+
 class TipoMovimiento(str, PyEnum):
     CARGO = "CARGO"
     PAGO = "PAGO"
@@ -72,6 +100,7 @@ class Cliente(Base):
     )
     activo: Mapped[bool] = mapped_column(Boolean, default=True, index=True, nullable=False)
     fecha_alta: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+    periodo_actual: Mapped[Optional[str]] = mapped_column(String(7), nullable=True)
 
     movimientos: Mapped[List["Movimiento"]] = relationship(
         "Movimiento",
@@ -100,6 +129,7 @@ class Movimiento(Base):
     monto: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     saldo_resultante: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     nota: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    periodo: Mapped[Optional[str]] = mapped_column(String(7), index=True, nullable=True)
 
     anulado: Mapped[bool] = mapped_column(Boolean, default=False, index=True, nullable=False)
     anulado_por_id: Mapped[Optional[int]] = mapped_column(ForeignKey("usuarios.id"), nullable=True)

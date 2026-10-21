@@ -5,7 +5,17 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models import Cliente, ClienteArticulo, EstadoArticulo, Movimiento, Producto, TipoMovimiento, Usuario, ahora_argentina
+from app.models import (
+    Cliente,
+    ClienteArticulo,
+    EstadoArticulo,
+    Movimiento,
+    Producto,
+    TipoMovimiento,
+    Usuario,
+    ahora_argentina,
+    obtener_periodo_activo_cliente,
+)
 from app.schemas import (
     ClienteArticuloCreate,
     ClienteArticuloOut,
@@ -337,6 +347,7 @@ def liquidar_articulos_a_precio_actual(
             monto=monto_item,
             saldo_resultante=nuevo_saldo,
             nota=f"{producto.nombre} ({cant_str} {producto.unidad} liquidada al valor actual de ${precio_vigente:,.2f}){nota_extra}",
+            periodo=obtener_periodo_activo_cliente(cliente),
             anulado=False,
             fecha_creacion=ahora
         )

@@ -65,6 +65,7 @@ class ClienteOut(BaseModel):
     ultima_actividad: datetime
     activo: bool
     fecha_alta: datetime
+    periodo_actual: Optional[str] = None
     total_articulos_pendientes: Decimal = Decimal("0.00")
     articulos_pendientes_count: int = 0
     saldo_total: Decimal = Decimal("0.00")
@@ -81,6 +82,7 @@ class MovimientoCreate(BaseModel):
     tipo: TipoMovimiento
     monto: Decimal = Field(..., gt=Decimal("0.00"))
     nota: Optional[str] = Field(default=None, max_length=255)
+    periodo: Optional[str] = Field(default=None, max_length=7)
 
 
 class MovimientoOut(BaseModel):
@@ -92,6 +94,7 @@ class MovimientoOut(BaseModel):
     monto: Decimal
     saldo_resultante: Decimal
     nota: Optional[str] = None
+    periodo: Optional[str] = None
     anulado: bool
     anulado_por_id: Optional[int] = None
     anulado_por_nombre: Optional[str] = None
@@ -159,6 +162,21 @@ class ClienteArticuloOut(BaseModel):
 class LiquidarArticulosRequest(BaseModel):
     articulo_ids: Optional[List[int]] = Field(default=None, description="IDs específicos a liquidar o None para todos los pendientes")
     nota_adicional: Optional[str] = Field(default=None, max_length=100)
+
+
+class CerrarMesRequest(BaseModel):
+    nota_cierre: Optional[str] = Field(default=None, max_length=150)
+
+
+class CerrarMesResponse(BaseModel):
+    ok: bool
+    mensaje: str
+    periodo_cerrado: str
+    nuevo_periodo_activo: str
+    articulos_liquidados_count: int
+    total_articulos_liquidados: Decimal
+    saldo_cierre: Decimal
+    cliente: ClienteOut
 
 
 class ResumenMensualOut(BaseModel):

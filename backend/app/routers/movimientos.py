@@ -21,6 +21,7 @@ def _map_movimiento_out(m: Movimiento) -> MovimientoOut:
         monto=m.monto,
         saldo_resultante=m.saldo_resultante,
         nota=m.nota,
+        periodo=m.periodo or m.fecha_creacion.strftime("%Y-%m"),
         anulado=m.anulado,
         anulado_por_id=m.anulado_por_id,
         anulado_por_nombre=m.anulado_por.nombre if m.anulado_por else None,

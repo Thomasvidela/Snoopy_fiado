@@ -19,11 +19,13 @@ import {
   ChevronUp,
   Search,
   X,
+  Calculator,
 } from 'lucide-react';
 import { Cliente, Movimiento, ClienteArticulo } from '../types';
 import { MovementList } from './MovementList';
 import { EditClientModal } from './EditClientModal';
 import { AddArticleModal } from './AddArticleModal';
+import { CloseAccountModal } from './CloseAccountModal';
 import { PostOperationInfo } from './PostOperationModal';
 import { formatCurrency, normalizeArgentinePhone, getWhatsAppCleanNumber } from '../utils/format';
 import { hapticTap, hapticSuccess, hapticError } from '../utils/haptics';
@@ -36,7 +38,7 @@ interface ClientDetailProps {
   onBack?: () => void;
   onCloseCliente?: () => void;
   onOpenMovementModal: (tipo: 'CARGO' | 'PAGO') => void;
-  onOpenWhatsAppModal: () => void;
+  onOpenWhatsAppModal: (periodo?: string) => void;
   onAnularMovimiento: (movimientoId: number) => Promise<void>;
   onToggleActivo?: (clienteId: number) => Promise<void>;
   onUpdateCliente?: (clienteActualizado: Cliente) => void;
@@ -71,6 +73,7 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
   const [menuOpen, setMenuOpen] = useState<boolean>(false);
   const [editModalOpen, setEditModalOpen] = useState<boolean>(false);
   const [addArticleModalOpen, setAddArticleModalOpen] = useState<boolean>(false);
+  const [closeAccountModalOpen, setCloseAccountModalOpen] = useState<boolean>(false);
   const [articulos, setArticulos] = useState<ClienteArticulo[]>([]);
   const [loadingArticulos, setLoadingArticulos] = useState<boolean>(false);
   const [liquidando, setLiquidando] = useState<boolean>(false);
@@ -387,7 +390,7 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
           <div className="flex items-center gap-2 shrink-0">
             {/* Quick WhatsApp Summary Button */}
             <button
-              onClick={onOpenWhatsAppModal}
+              onClick={() => onOpenWhatsAppModal()}
               title="Enviar resumen mensual por WhatsApp"
               className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600/15 hover:bg-emerald-600/25 border border-emerald-500/30 text-emerald-400 text-xs font-semibold transition active:scale-95"
             >
@@ -506,12 +509,28 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
             </span>
           </div>
 
-          <div
-            className={`text-2xl sm:text-3xl font-extrabold tracking-tight mt-1 ${
-              hasDebt ? 'text-rose-400' : isCredit ? 'text-cyan-400' : 'text-emerald-400'
-            }`}
-          >
-            {formatCurrency(articulosPendientes.length > 0 ? saldoTotal : cliente.saldo_actual)}
+          <div className="flex items-center justify-between gap-3 flex-wrap mt-1">
+            <div
+              className={`text-2xl sm:text-3xl font-extrabold tracking-tight ${
+                hasDebt ? 'text-rose-400' : isCredit ? 'text-cyan-400' : 'text-emerald-400'
+              }`}
+            >
+              {formatCurrency(articulosPendientes.length > 0 ? saldoTotal : cliente.saldo_actual)}
+            </div>
+
+            {cliente.activo && (
+              <button
+                type="button"
+                onClick={() => {
+                  hapticTap(15);
+                  setCloseAccountModalOpen(true);
+                }}
+                className="px-3 py-2 rounded-xl bg-slate-800/90 hover:bg-emerald-600 border border-slate-600/80 hover:border-emerald-500 text-slate-100 hover:text-white text-xs font-bold transition active:scale-95 flex items-center gap-1.5 shadow-md"
+              >
+                <Calculator className="w-4 h-4 text-emerald-400 group-hover:text-white shrink-0" />
+                <span>Liquidar / Cerrar Mes</span>
+              </button>
+            )}
           </div>
 
           {articulosPendientes.length > 0 && (
@@ -736,15 +755,17 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
         <div className="flex items-center justify-between mb-3 px-1">
           <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
             <Calendar className="w-4 h-4 text-slate-500" />
-            Libro Mayor Inmutable ({movimientos.length})
+            Períodos Mensuales y Movimientos ({movimientos.length})
           </h3>
-          <span className="text-[11px] text-slate-500">Orden cronológico inverso</span>
+          <span className="text-[11px] text-slate-500">Seleccione una pestaña de mes</span>
         </div>
 
         <MovementList
           movimientos={movimientos}
           loading={loadingMovimientos}
+          periodoActivo={cliente.periodo_actual}
           onAnular={onAnularMovimiento}
+          onOpenWhatsAppMes={(periodo) => onOpenWhatsAppModal(periodo)}
         />
       </div>
 
@@ -777,6 +798,21 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
               monto: art.subtotal_actual,
               esCargo: true,
             });
+          }
+        }}
+      />
+
+      {/* Modal para Cerrar Cuenta / Liquidar Mes */}
+      <CloseAccountModal
+        isOpen={closeAccountModalOpen}
+        cliente={cliente}
+        articulosPendientes={articulosPendientes}
+        onClose={() => setCloseAccountModalOpen(false)}
+        onSuccess={async (info) => {
+          await cargarArticulos();
+          if (onRefreshClient) await onRefreshClient();
+          if (onOperationFinished) {
+            onOperationFinished(info);
           }
         }}
       />

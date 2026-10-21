@@ -35,6 +35,7 @@ export const App: React.FC = () => {
   const [movementModalOpen, setMovementModalOpen] = useState<boolean>(false);
   const [movementDefaultTipo, setMovementDefaultTipo] = useState<'CARGO' | 'PAGO'>('CARGO');
   const [whatsAppModalOpen, setWhatsAppModalOpen] = useState<boolean>(false);
+  const [whatsAppInitialPeriod, setWhatsAppInitialPeriod] = useState<string | undefined>(undefined);
   const [newClientModalOpen, setNewClientModalOpen] = useState<boolean>(false);
   const [manageOperatorsOpen, setManageOperatorsOpen] = useState<boolean>(false);
   const [manageProductsOpen, setManageProductsOpen] = useState<boolean>(false);
@@ -275,7 +276,10 @@ export const App: React.FC = () => {
                 setMovementDefaultTipo(tipo);
                 setMovementModalOpen(true);
               }}
-              onOpenWhatsAppModal={() => setWhatsAppModalOpen(true)}
+              onOpenWhatsAppModal={(periodo?: string) => {
+                setWhatsAppInitialPeriod(periodo);
+                setWhatsAppModalOpen(true);
+              }}
               onAnularMovimiento={handleAnularMovimiento}
               onToggleActivo={handleToggleClienteActivo}
               onUpdateCliente={handleUpdateCliente}
@@ -342,7 +346,11 @@ export const App: React.FC = () => {
       <WhatsAppModal
         isOpen={whatsAppModalOpen}
         cliente={selectedCliente}
-        onClose={() => setWhatsAppModalOpen(false)}
+        initialPeriod={whatsAppInitialPeriod}
+        onClose={() => {
+          setWhatsAppModalOpen(false);
+          setWhatsAppInitialPeriod(undefined);
+        }}
       />
 
       {/* New Client Modal */}

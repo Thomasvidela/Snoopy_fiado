@@ -16,6 +16,7 @@ export interface Cliente {
   ultima_actividad: string;
   activo: boolean;
   fecha_alta: string;
+  periodo_actual?: string | null;
   total_articulos_pendientes?: string;
   articulos_pendientes_count?: number;
   saldo_total?: string;
@@ -35,6 +36,7 @@ export interface Movimiento {
   monto: string;
   saldo_resultante: string;
   nota?: string | null;
+  periodo?: string | null;
   anulado: boolean;
   anulado_por_id?: number | null;
   anulado_por_nombre?: string | null;
@@ -121,6 +123,18 @@ export interface MovimientoCreatePayload {
   tipo: 'CARGO' | 'PAGO';
   monto: string;
   nota?: string;
+  periodo?: string;
+}
+
+export interface CerrarMesResponse {
+  ok: boolean;
+  mensaje: string;
+  periodo_cerrado: string;
+  nuevo_periodo_activo: string;
+  articulos_liquidados_count: number;
+  total_articulos_liquidados: string;
+  saldo_cierre: string;
+  cliente: Cliente;
 }
 
 export interface OperadorCreatePayload {

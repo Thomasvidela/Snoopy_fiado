@@ -1,4 +1,5 @@
 import {
+  CerrarMesResponse,
   Cliente,
   ClienteArticulo,
   ClienteArticuloCreatePayload,
@@ -165,6 +166,11 @@ export const api = {
     if (mes) params.set('mes', mes);
     return apiRequest<ResumenMensual>(`/clientes/${clienteId}/resumen?${params.toString()}`);
   },
+  cerrarMesCliente: (clienteId: number, nota_cierre?: string) =>
+    apiRequest<CerrarMesResponse>(`/clientes/${clienteId}/cerrar-mes`, {
+      method: 'POST',
+      body: JSON.stringify({ nota_cierre }),
+    }),
 
   // Movimientos
   getMovimientos: (clienteId: number) =>

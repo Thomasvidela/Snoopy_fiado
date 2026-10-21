@@ -17,12 +17,14 @@ import { formatCurrency, getWhatsAppCleanNumber, normalizeArgentinePhone } from 
 interface WhatsAppModalProps {
   isOpen: boolean;
   cliente: Cliente | null;
+  initialPeriod?: string;
   onClose: () => void;
 }
 
 export const WhatsAppModal: React.FC<WhatsAppModalProps> = ({
   isOpen,
   cliente,
+  initialPeriod,
   onClose,
 }) => {
   const [currentPeriod, setCurrentPeriod] = useState<string>(() => {
@@ -35,6 +37,15 @@ export const WhatsAppModal: React.FC<WhatsAppModalProps> = ({
   const [copied, setCopied] = useState<boolean>(false);
   const [descargandoExcel, setDescargandoExcel] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen && cliente) {
+      const now = new Date();
+      const defaultMes = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      const targetPeriod = initialPeriod || cliente.periodo_actual || defaultMes;
+      setCurrentPeriod(targetPeriod);
+    }
+  }, [isOpen, cliente?.id, initialPeriod]);
 
   useEffect(() => {
     if (isOpen && cliente) {

@@ -8,11 +8,29 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models import Cliente, ClienteArticulo, EstadoArticulo, Movimiento, Usuario, ahora_argentina
-from app.schemas import ClienteCreate, ClienteOut, ClienteUpdate, ListadoClientesResponse, ResumenMensualOut
+from app.models import (
+    Cliente,
+    ClienteArticulo,
+    EstadoArticulo,
+    Movimiento,
+    TipoMovimiento,
+    Usuario,
+    ahora_argentina,
+    calcular_siguiente_periodo,
+    obtener_periodo_activo_cliente,
+)
+from app.schemas import (
+    CerrarMesRequest,
+    CerrarMesResponse,
+    ClienteCreate,
+    ClienteOut,
+    ClienteUpdate,
+    ListadoClientesResponse,
+    ResumenMensualOut,
+)
 from app.services.excel import generar_excel_cliente
-from app.services.ledger import LedgerService, normalizar_telefono_argentina
-from app.services.resumen import ResumenService, parse_periodo
+from app.services.ledger import LedgerService, _lock_query, normalizar_telefono_argentina
+from app.services.resumen import MESES_ES, ResumenService, parse_periodo
 
 router = APIRouter(prefix="/clientes", tags=["Clientes"])
 
@@ -37,6 +55,7 @@ def _map_cliente_out(cliente: Cliente) -> ClienteOut:
         ultima_actividad=cliente.ultima_actividad,
         activo=cliente.activo,
         fecha_alta=cliente.fecha_alta,
+        periodo_actual=obtener_periodo_activo_cliente(cliente),
         total_articulos_pendientes=total_articulos,
         articulos_pendientes_count=count_articulos,
         saldo_total=saldo_total
@@ -166,10 +185,104 @@ def toggle_cliente_activo(
     return _map_cliente_out(cliente)
 
 
+@router.post("/{cliente_id}/cerrar-mes", response_model=CerrarMesResponse)
+def cerrar_mes_cliente(
+    cliente_id: int,
+    payload: Optional[CerrarMesRequest] = None,
+    db: Session = Depends(get_db),
+    operador: Usuario = Depends(get_current_user)
+):
+    """
+    Cierra/liquida el período mensual activo del cliente sin exigir cobro inmediato:
+    1. Si tiene productos dinámicos pendientes (ej: garrafas), los liquida al valor de hoy dentro del mes que cierra.
+    2. Avanza el período activo del cliente al mes siguiente para que los próximos fiados se anoten en la nueva pestaña.
+    """
+    cliente_query = db.query(Cliente).filter(Cliente.id == cliente_id)
+    cliente = _lock_query(cliente_query, db).first()
+    if not cliente:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Cliente no encontrado."
+        )
+
+    if not cliente.activo:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No se puede cerrar el mes de un cliente inactivo."
+        )
+
+    periodo_a_cerrar = obtener_periodo_activo_cliente(cliente)
+    _, _, anio_cierre, mes_cierre = parse_periodo(periodo_a_cerrar)
+    nombre_mes_cierre = f"{MESES_ES.get(mes_cierre, str(mes_cierre))} {anio_cierre}"
+
+    articulos_pendientes = (
+        db.query(ClienteArticulo)
+        .filter(
+            ClienteArticulo.cliente_id == cliente_id,
+            ClienteArticulo.estado == EstadoArticulo.PENDIENTE
+        )
+        .order_by(ClienteArticulo.fecha_creacion.asc())
+        .all()
+    )
+
+    ahora = ahora_argentina()
+    total_liquidado = Decimal("0.00")
+
+    for art in articulos_pendientes:
+        producto = art.producto
+        precio_vigente = producto.precio_actual
+        monto_item = art.cantidad * precio_vigente
+        nuevo_saldo = cliente.saldo_actual + monto_item
+
+        nota_extra = f" ({art.nota})" if art.nota else ""
+        cant_str = f"{art.cantidad:g}"
+        mov = Movimiento(
+            cliente_id=cliente.id,
+            usuario_id=operador.id,
+            tipo=TipoMovimiento.CARGO,
+            monto=monto_item,
+            saldo_resultante=nuevo_saldo,
+            nota=f"{producto.nombre} ({cant_str} {producto.unidad} liquidada al cierre de {nombre_mes_cierre} a ${precio_vigente:,.2f}){nota_extra}",
+            periodo=periodo_a_cerrar,
+            anulado=False,
+            fecha_creacion=ahora
+        )
+        db.add(mov)
+        db.flush()
+
+        cliente.saldo_actual = nuevo_saldo
+        art.estado = EstadoArticulo.LIQUIDADO
+        art.movimiento_id = mov.id
+        art.precio_liquidado = precio_vigente
+        art.fecha_liquidacion = ahora
+        total_liquidado += monto_item
+
+    nuevo_periodo = calcular_siguiente_periodo(periodo_a_cerrar)
+    cliente.periodo_actual = nuevo_periodo
+    cliente.ultima_actividad = ahora
+
+    db.commit()
+    db.refresh(cliente)
+
+    _, _, anio_nuevo, mes_nuevo = parse_periodo(nuevo_periodo)
+    nombre_mes_nuevo = f"{MESES_ES.get(mes_nuevo, str(mes_nuevo))} {anio_nuevo}"
+
+    return CerrarMesResponse(
+        ok=True,
+        mensaje=f"Período {nombre_mes_cierre} cerrado. Los nuevos movimientos se anotarán en {nombre_mes_nuevo}.",
+        periodo_cerrado=periodo_a_cerrar,
+        nuevo_periodo_activo=nuevo_periodo,
+        articulos_liquidados_count=len(articulos_pendientes),
+        total_articulos_liquidados=total_liquidado,
+        saldo_cierre=cliente.saldo_actual,
+        cliente=_map_cliente_out(cliente)
+    )
+
+
 @router.get("/{cliente_id}/resumen", response_model=ResumenMensualOut)
 def obtener_resumen_mensual(
     cliente_id: int,
-    mes: Optional[str] = Query(None, description="Período en formato YYYY-MM (por defecto el mes actual)"),
+    mes: Optional[str] = Query(None, description="Período en formato YYYY-MM (por defecto el período activo del cliente)"),
     db: Session = Depends(get_db),
     operador: Usuario = Depends(get_current_user)
 ):
@@ -178,7 +291,8 @@ def obtener_resumen_mensual(
     el texto formateado listo para enviar por WhatsApp.
     """
     if not mes:
-        mes = ahora_argentina().strftime("%Y-%m")
+        cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+        mes = obtener_periodo_activo_cliente(cliente) if cliente else ahora_argentina().strftime("%Y-%m")
 
     resumen = ResumenService.generar_resumen(db=db, cliente_id=cliente_id, periodo=mes)
     return resumen
@@ -204,15 +318,15 @@ def exportar_movimientos_excel(
 
     saldo_anterior = None
     if mes:
-        inicio_mes, fin_mes, _, _ = parse_periodo(mes)
-        # Saldo anterior al mes
+        parse_periodo(mes)  # Validar formato YYYY-MM
+        # Saldo anterior al período
         ultimo_anterior = (
             db.query(Movimiento)
             .filter(
                 Movimiento.cliente_id == cliente_id,
-                Movimiento.fecha_creacion < inicio_mes
+                Movimiento.periodo < mes
             )
-            .order_by(Movimiento.fecha_creacion.desc(), Movimiento.id.desc())
+            .order_by(Movimiento.periodo.desc(), Movimiento.fecha_creacion.desc(), Movimiento.id.desc())
             .first()
         )
         saldo_anterior = ultimo_anterior.saldo_resultante if ultimo_anterior else Decimal("0.00")
@@ -222,8 +336,7 @@ def exportar_movimientos_excel(
             db.query(Movimiento)
             .filter(
                 Movimiento.cliente_id == cliente_id,
-                Movimiento.fecha_creacion >= inicio_mes,
-                Movimiento.fecha_creacion <= fin_mes
+                Movimiento.periodo == mes
             )
             .order_by(Movimiento.fecha_creacion.asc(), Movimiento.id.asc())
             .all()

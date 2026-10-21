@@ -5,7 +5,14 @@ from typing import List, Tuple
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.models import Cliente, ClienteArticulo, EstadoArticulo, Movimiento, TipoMovimiento
+from app.models import (
+    Cliente,
+    ClienteArticulo,
+    EstadoArticulo,
+    Movimiento,
+    TipoMovimiento,
+    obtener_periodo_activo_cliente,
+)
 from app.schemas import ClienteArticuloOut, ClienteOut, MovimientoOut, ResumenMensualOut
 
 MESES_ES = {
@@ -76,16 +83,17 @@ class ResumenService:
                 detail="Cliente no encontrado."
             )
 
-        inicio_mes, fin_mes, anio, mes = parse_periodo(periodo)
+        _, _, anio, mes = parse_periodo(periodo)
+        periodo_activo = obtener_periodo_activo_cliente(cliente)
 
-        # 1. Saldo anterior: último movimiento ANTERIOR al inicio del mes
+        # 1. Saldo anterior: último movimiento de un período ANTERIOR al consultado
         ultimo_mov_anterior = (
             db.query(Movimiento)
             .filter(
                 Movimiento.cliente_id == cliente_id,
-                Movimiento.fecha_creacion < inicio_mes
+                Movimiento.periodo < periodo
             )
-            .order_by(Movimiento.fecha_creacion.desc(), Movimiento.id.desc())
+            .order_by(Movimiento.periodo.desc(), Movimiento.fecha_creacion.desc(), Movimiento.id.desc())
             .first()
         )
         saldo_anterior = ultimo_mov_anterior.saldo_resultante if ultimo_mov_anterior else Decimal("0.00")
@@ -95,8 +103,7 @@ class ResumenService:
             db.query(Movimiento)
             .filter(
                 Movimiento.cliente_id == cliente_id,
-                Movimiento.fecha_creacion >= inicio_mes,
-                Movimiento.fecha_creacion <= fin_mes
+                Movimiento.periodo == periodo
             )
             .order_by(Movimiento.fecha_creacion.asc(), Movimiento.id.asc())
             .all()
@@ -136,6 +143,7 @@ class ResumenService:
                 monto=m.monto,
                 saldo_resultante=m.saldo_resultante,
                 nota=m.nota,
+                periodo=m.periodo or periodo,
                 anulado=m.anulado,
                 anulado_por_id=m.anulado_por_id,
                 anulado_por_nombre=anulado_por_nombre,
@@ -157,16 +165,19 @@ class ResumenService:
                 nota_txt = f" - {m.nota}" if m.nota else ""
                 lineas_detalle.append(f"- {fecha_str}: -{formatear_pesos(m.monto)} (Pago recibido{nota_txt})")
 
-        # Artículos dinámicos pendientes de cotización (ej: garrafas de gas)
-        articulos_pendientes_db = (
-            db.query(ClienteArticulo)
-            .filter(
-                ClienteArticulo.cliente_id == cliente_id,
-                ClienteArticulo.estado == EstadoArticulo.PENDIENTE
+        # Artículos dinámicos pendientes de cotización (solo aplican al período actualmente abierto)
+        if periodo == periodo_activo:
+            articulos_pendientes_db = (
+                db.query(ClienteArticulo)
+                .filter(
+                    ClienteArticulo.cliente_id == cliente_id,
+                    ClienteArticulo.estado == EstadoArticulo.PENDIENTE
+                )
+                .order_by(ClienteArticulo.fecha_creacion.asc())
+                .all()
             )
-            .order_by(ClienteArticulo.fecha_creacion.asc())
-            .all()
-        )
+        else:
+            articulos_pendientes_db = []
 
         total_articulos = Decimal("0.00")
         lineas_articulos = []
@@ -242,6 +253,7 @@ class ResumenService:
                 ultima_actividad=cliente.ultima_actividad,
                 activo=cliente.activo,
                 fecha_alta=cliente.fecha_alta,
+                periodo_actual=periodo_activo,
                 total_articulos_pendientes=total_articulos,
                 articulos_pendientes_count=len(articulos_pendientes_db),
                 saldo_total=saldo_total_con_articulos

@@ -1,13 +1,15 @@
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.database import Base, SessionLocal, engine
+from app.database import Base, SessionLocal, engine, get_db
 from app.routers import auth, clientes, movimientos, productos
 from app.seed import seed_database
 
@@ -63,12 +65,26 @@ app.include_router(productos.router, prefix="/api")
 
 
 @app.get("/api/health", tags=["Salud"])
-def health_check():
-    return {
-        "status": "ok",
-        "proyecto": settings.PROJECT_NAME,
-        "database": engine.dialect.name
-    }
+def health_check(db: Session = Depends(get_db)):
+    try:
+        db.execute(text("SELECT 1"))
+        return {
+            "status": "ok",
+            "proyecto": settings.PROJECT_NAME,
+            "database": engine.dialect.name,
+            "db_conectada": True,
+        }
+    except Exception:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "error",
+                "proyecto": settings.PROJECT_NAME,
+                "database": engine.dialect.name,
+                "db_conectada": False,
+                "detalle": "No se pudo conectar a la base de datos",
+            },
+        )
 
 
 # Configuración del frontend React compilado (monolito modular)

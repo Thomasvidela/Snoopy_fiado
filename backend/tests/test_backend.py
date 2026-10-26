@@ -450,3 +450,85 @@ def test_productos_dinamicos_y_articulos(client):
     assert cli_check3["articulos_pendientes_count"] == 0
 
 
+def test_health_check_y_watchdog_transiciones(client, monkeypatch):
+    # 1. Verificar endpoint /api/health con conexión activa a la base de datos
+    resp_health = client.get("/api/health")
+    assert resp_health.status_code == 200
+    health_data = resp_health.json()
+    assert health_data["status"] == "ok"
+    assert health_data["db_conectada"] is True
+
+    # 2. Probar lógica de transición de estados y anti-spam del Watchdog
+    import sys
+    from pathlib import Path
+    root_dir = Path(__file__).resolve().parent.parent.parent
+    if str(root_dir) not in sys.path:
+        sys.path.insert(0, str(root_dir))
+
+    from monitoring import watchdog
+
+    alertas_enviadas = []
+    heartbeats_enviados = []
+
+    def fake_enviar_webhook(webhook_url, titulo, descripcion, color_hex=0, campos=None):
+        alertas_enviadas.append({"titulo": titulo, "descripcion": descripcion, "color": color_hex})
+        return True
+
+    def fake_enviar_heartbeat(heartbeat_url, exito=True):
+        heartbeats_enviados.append(exito)
+        return True
+
+    monkeypatch.setattr(watchdog, "enviar_webhook", fake_enviar_webhook)
+    monkeypatch.setattr(watchdog, "enviar_heartbeat", fake_enviar_heartbeat)
+    monkeypatch.setattr(watchdog, "lista_contenedores_monitoreados", lambda: ["fiados_app", "fiados_db"])
+    monkeypatch.setattr(watchdog, "verificar_api_health", lambda url, timeout=5: (True, "HTTP 200 OK"))
+
+    estado_previo = {}
+
+    # Ciclo 1: Todos los contenedores sanos -> 0 alertas de caída, 1 heartbeat exitoso
+    monkeypatch.setattr(
+        watchdog,
+        "obtener_contenedores_docker",
+        lambda sock: {
+            "fiados_app": {"state": "running", "status": "Up 10 minutes (healthy)", "healthy": True},
+            "fiados_db": {"state": "running", "status": "Up 10 minutes (healthy)", "healthy": True},
+        },
+    )
+    assert watchdog.ejecutar_ciclo(estado_previo, "https://discord.com/api/webhooks/test", "https://hc-ping.com/test", "http://app:8000/api/health", "/var/run/docker.sock") is True
+    assert len(alertas_enviadas) == 0
+    assert heartbeats_enviados == [True]
+
+    # Ciclo 2: Cae fiados_db -> 1 alerta de caída, 1 heartbeat con exito=False
+    monkeypatch.setattr(
+        watchdog,
+        "obtener_contenedores_docker",
+        lambda sock: {
+            "fiados_app": {"state": "running", "status": "Up 11 minutes (healthy)", "healthy": True},
+            "fiados_db": {"state": "exited", "status": "Exited (1) 5 seconds ago", "healthy": False},
+        },
+    )
+    assert watchdog.ejecutar_ciclo(estado_previo, "https://discord.com/api/webhooks/test", "https://hc-ping.com/test", "http://app:8000/api/health", "/var/run/docker.sock") is False
+    assert len(alertas_enviadas) == 1
+    assert "Contenedor Caído: fiados_db" in alertas_enviadas[0]["titulo"]
+    assert heartbeats_enviados[-1] is False
+
+    # Ciclo 3: fiados_db sigue caído -> NO debe spamear otra alerta repetida
+    assert watchdog.ejecutar_ciclo(estado_previo, "https://discord.com/api/webhooks/test", "https://hc-ping.com/test", "http://app:8000/api/health", "/var/run/docker.sock") is False
+    assert len(alertas_enviadas) == 1
+
+    # Ciclo 4: fiados_db se recupera -> Envía alerta de recuperación
+    monkeypatch.setattr(
+        watchdog,
+        "obtener_contenedores_docker",
+        lambda sock: {
+            "fiados_app": {"state": "running", "status": "Up 12 minutes (healthy)", "healthy": True},
+            "fiados_db": {"state": "running", "status": "Up 2 seconds (healthy)", "healthy": True},
+        },
+    )
+    assert watchdog.ejecutar_ciclo(estado_previo, "https://discord.com/api/webhooks/test", "https://hc-ping.com/test", "http://app:8000/api/health", "/var/run/docker.sock") is True
+    assert len(alertas_enviadas) == 2
+    assert "Contenedor Recuperado: fiados_db" in alertas_enviadas[1]["titulo"]
+    assert heartbeats_enviados[-1] is True
+
+
+

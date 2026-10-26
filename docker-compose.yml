@@ -76,6 +76,28 @@ services:
     networks:
       - fiados_net
 
+  # Sidecar de Monitoreo Dual (Vigila contenedores locales + envía latido externo)
+  watchdog:
+    image: python:3.12-alpine
+    container_name: fiados_watchdog
+    restart: unless-stopped
+    command: python -u /app/watchdog.py
+    environment:
+      - MONITOR_WEBHOOK_URL=${MONITOR_WEBHOOK_URL:-}
+      - HEARTBEAT_URL=${HEARTBEAT_URL:-}
+      - MONITOR_INTERVAL_SECONDS=${MONITOR_INTERVAL_SECONDS:-30}
+      - MONITOR_NOTIFY_ON_STARTUP=${MONITOR_NOTIFY_ON_STARTUP:-true}
+      - CLOUDFLARE_TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:-}
+      - APP_HEALTH_URL=http://app:8000/api/health
+      - TZ=America/Argentina/Buenos_Aires
+    volumes:
+      - ./monitoring/watchdog.py:/app/watchdog.py:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - app
+    networks:
+      - fiados_net
+
 networks:
   fiados_net:
     driver: bridge

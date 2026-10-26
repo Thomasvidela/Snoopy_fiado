@@ -181,6 +181,35 @@ docker exec -t fiados_db pg_dump -U postgres fiados > backups/backup_manual_$(da
 
 ---
 
+## 📡 Monitoreo de Contenedores y Estado de la PC (Discord / Slack + Heartbeat)
+
+El sistema incluye el contenedor `fiados_watchdog` (`monitoring/watchdog.py`), diseñado con arquitectura dual para distinguir entre **dos escenarios distintos**:
+
+1. **Se cayó un contenedor pero la PC sigue encendida:**
+   - `fiados_watchdog` inspecciona cada 30 segundos el motor Docker (`/var/run/docker.sock`) y el endpoint `/api/health` (que valida FastAPI + PostgreSQL con `SELECT 1`).
+   - Si `fiados_app`, `fiados_db`, `fiados_backups` o `fiados_tunnel` se detiene o queda `unhealthy`, envía una **alerta inmediata a Discord o Slack** indicando qué contenedor falló.
+2. **La PC del local se apagó o se cortó la luz/internet:**
+   - `fiados_watchdog` envía un latido (*Heartbeat / Dead Man's Switch*) cada 30 segundos a un servicio externo gratuito como **Healthchecks.io**.
+   - Si la PC se apaga, el servicio externo deja de recibir el latido y envía una alerta a tu mismo canal de Discord/Slack avisando que la PC dejó de responder.
+
+### Configuración en 3 pasos:
+
+1. **Crear el Webhook en Discord o Slack:**
+   - **En Discord:** Entrar a tu servidor -> *Editar canal* -> *Integraciones* -> *Webhooks* -> *Nuevo Webhook* -> *Copiar URL del Webhook*.
+   - Pegar la URL en tu archivo `.env` en la variable `MONITOR_WEBHOOK_URL`.
+
+2. **Probar que la alerta llega a tu celular/PC:**
+   ```powershell
+   backend\.venv\Scripts\python.exe monitoring/watchdog.py --test-webhook
+   ```
+
+3. **Activar el detector de PC apagada (Gratis con Healthchecks.io):**
+   - Crear una cuenta gratuita en [https://healthchecks.io](https://healthchecks.io) y crear un Check con **Period: 1 minute** y **Grace Time: 2 minutes**.
+   - En la pestaña **Integrations** de Healthchecks.io, conectar tu canal de **Discord** o **Slack**.
+   - Copiar la URL de ping (`https://hc-ping.com/xxxx...`) y pegarla en `HEARTBEAT_URL` dentro de tu `.env`.
+
+---
+
 ## 🧪 Tests del Sistema
 
 El proyecto cuenta con una suite completa de pruebas unitarias y de integración que verifica la concurrencia contable, la inmutabilidad del ledger, los cálculos en pesos argentinos y las exportaciones a Excel:

@@ -195,6 +195,7 @@ class ClienteArticulo(Base):
     usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), nullable=False)
     cantidad: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("1.00"), nullable=False)
     nota: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    periodo: Mapped[Optional[str]] = mapped_column(String(7), index=True, nullable=True)
     estado: Mapped[EstadoArticulo] = mapped_column(
         Enum(EstadoArticulo, name="estado_articulo"),
         default=EstadoArticulo.PENDIENTE,

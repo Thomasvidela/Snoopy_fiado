@@ -12,7 +12,7 @@ from app.models import (
     ahora_argentina,
     obtener_periodo_activo_cliente,
 )
-from app.schemas import ClienteCreate, MovimientoCreate
+from app.schemas import ClienteCreate, MovimientoCreate, MovimientoUpdate
 
 
 def _lock_query(query: Query, db: Session) -> Query:
@@ -260,3 +260,78 @@ class LedgerService:
         db.commit()
         db.refresh(contra_asiento)
         return contra_asiento
+
+    @staticmethod
+    def editar_movimiento(
+        db: Session,
+        movimiento_id: int,
+        datos: MovimientoUpdate,
+        operador: Usuario
+    ) -> Movimiento:
+        """
+        Permite editar el monto y/o la nota de un movimiento activo (CARGO o PAGO),
+        incluyendo movimientos de meses anteriores, recalculando de forma consistente
+        los saldos resultantes y el saldo actual del cliente.
+        """
+        mov_query = db.query(Movimiento).filter(Movimiento.id == movimiento_id)
+        movimiento = _lock_query(mov_query, db).first()
+
+        if not movimiento:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Movimiento no encontrado."
+            )
+
+        if movimiento.anulado:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No se puede editar un movimiento que se encuentra anulado."
+            )
+
+        if movimiento.tipo not in (TipoMovimiento.CARGO, TipoMovimiento.PAGO):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Solo se pueden editar movimientos de tipo CARGO o PAGO."
+            )
+
+        cliente_query = db.query(Cliente).filter(Cliente.id == movimiento.cliente_id)
+        cliente = _lock_query(cliente_query, db).first()
+        if not cliente:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Cliente asociado no encontrado."
+            )
+
+        if datos.nota is not None:
+            movimiento.nota = datos.nota.strip() if datos.nota.strip() else None
+
+        if datos.monto is not None:
+            nuevo_monto = Decimal(str(datos.monto))
+            if nuevo_monto <= Decimal("0.00"):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="El monto debe ser estrictamente mayor a 0."
+                )
+            movimiento.monto = nuevo_monto
+
+            # Recalcular cronológicamente saldo_resultante de todos los movimientos del cliente
+            todos_movs = (
+                db.query(Movimiento)
+                .filter(Movimiento.cliente_id == cliente.id)
+                .order_by(Movimiento.fecha_creacion.asc(), Movimiento.id.asc())
+                .all()
+            )
+            saldo_acum = Decimal("0.00")
+            for m in todos_movs:
+                if m.tipo in (TipoMovimiento.CARGO, TipoMovimiento.ANULACION_PAGO):
+                    saldo_acum += m.monto
+                elif m.tipo in (TipoMovimiento.PAGO, TipoMovimiento.ANULACION_CARGO):
+                    saldo_acum -= m.monto
+                m.saldo_resultante = saldo_acum
+
+            cliente.saldo_actual = saldo_acum
+
+        cliente.ultima_actividad = ahora_argentina()
+        db.commit()
+        db.refresh(movimiento)
+        return movimiento

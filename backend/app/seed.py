@@ -4,7 +4,7 @@ from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 from app.database import Base, SessionLocal, engine
 from app.dependencies import hash_pin
-from app.models import Movimiento, Producto, Usuario, ahora_argentina
+from app.models import ClienteArticulo, Movimiento, Producto, Usuario, ahora_argentina
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -50,6 +50,20 @@ def ensure_schema_migrations(db: Session):
                 m.periodo = m.fecha_creacion.strftime("%Y-%m")
             db.commit()
             logger.info(f"Migración automática: período asignado a {len(sin_periodo)} movimiento(s) históricos.")
+
+    if "cliente_articulos" in tablas:
+        cols_arts = {c["name"] for c in inspector.get_columns("cliente_articulos")}
+        if "periodo" not in cols_arts:
+            db.execute(text("ALTER TABLE cliente_articulos ADD COLUMN periodo VARCHAR(7)"))
+            db.commit()
+            logger.info("Migración automática: columna 'periodo' agregada a 'cliente_articulos'.")
+
+        arts_sin_periodo = db.query(ClienteArticulo).filter(ClienteArticulo.periodo.is_(None)).all()
+        if arts_sin_periodo:
+            for a in arts_sin_periodo:
+                a.periodo = a.fecha_creacion.strftime("%Y-%m")
+            db.commit()
+            logger.info(f"Migración automática: período asignado a {len(arts_sin_periodo)} artículo(s) históricos.")
 
 
 def seed_database(db: Session = None):

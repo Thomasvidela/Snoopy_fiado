@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import Movimiento, Usuario
-from app.schemas import MovimientoCreate, MovimientoOut
+from app.schemas import MovimientoCreate, MovimientoOut, MovimientoUpdate
 from app.services.ledger import LedgerService
 
 router = APIRouter(tags=["Movimientos"])
@@ -91,3 +91,23 @@ def anular_movimiento(
         operador=operador
     )
     return _map_movimiento_out(contra_asiento)
+
+
+@router.put("/movimientos/{movimiento_id}", response_model=MovimientoOut)
+def editar_movimiento(
+    movimiento_id: int,
+    payload: MovimientoUpdate,
+    db: Session = Depends(get_db),
+    operador: Usuario = Depends(get_current_user)
+):
+    """
+    Edita el monto o la nota de un movimiento (incluso de un mes anterior),
+    recalculando atómicamente los saldos del cliente.
+    """
+    mov = LedgerService.editar_movimiento(
+        db=db,
+        movimiento_id=movimiento_id,
+        datos=payload,
+        operador=operador
+    )
+    return _map_movimiento_out(mov)

@@ -43,6 +43,7 @@ def _map_articulo_out(art: ClienteArticulo) -> ClienteArticuloOut:
         cantidad=art.cantidad,
         subtotal_actual=subtotal,
         nota=art.nota,
+        periodo=art.periodo or art.fecha_creacion.strftime("%Y-%m"),
         estado=art.estado.value,
         fecha_creacion=art.fecha_creacion,
         usuario_nombre=art.operador.nombre if art.operador else None,
@@ -243,12 +244,18 @@ def registrar_articulo_cliente(
         )
 
     ahora = ahora_argentina()
+    periodo_destino = (
+        payload.periodo.strip()
+        if getattr(payload, "periodo", None) and payload.periodo.strip()
+        else obtener_periodo_activo_cliente(cliente)
+    )
     articulo = ClienteArticulo(
         cliente_id=cliente.id,
         producto_id=producto.id,
         usuario_id=operador.id,
         cantidad=payload.cantidad,
         nota=payload.nota.strip() if payload.nota else None,
+        periodo=periodo_destino,
         estado=EstadoArticulo.PENDIENTE,
         fecha_creacion=ahora
     )
@@ -340,6 +347,11 @@ def liquidar_articulos_a_precio_actual(
             nota_extra += f" ({art.nota})"
 
         cant_str = f"{art.cantidad:g}"
+        periodo_item = (
+            payload.periodo.strip()
+            if getattr(payload, "periodo", None) and payload.periodo.strip()
+            else (art.periodo or obtener_periodo_activo_cliente(cliente))
+        )
         mov = Movimiento(
             cliente_id=cliente.id,
             usuario_id=operador.id,
@@ -347,7 +359,7 @@ def liquidar_articulos_a_precio_actual(
             monto=monto_item,
             saldo_resultante=nuevo_saldo,
             nota=f"{producto.nombre} ({cant_str} {producto.unidad} liquidada al valor actual de ${precio_vigente:,.2f}){nota_extra}",
-            periodo=obtener_periodo_activo_cliente(cliente),
+            periodo=periodo_item,
             anulado=False,
             fecha_creacion=ahora
         )

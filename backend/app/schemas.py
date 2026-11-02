@@ -85,6 +85,11 @@ class MovimientoCreate(BaseModel):
     periodo: Optional[str] = Field(default=None, max_length=7)
 
 
+class MovimientoUpdate(BaseModel):
+    monto: Optional[Decimal] = Field(default=None, gt=Decimal("0.00"))
+    nota: Optional[str] = Field(default=None, max_length=255)
+
+
 class MovimientoOut(BaseModel):
     id: int
     cliente_id: int
@@ -137,6 +142,7 @@ class ClienteArticuloCreate(BaseModel):
     producto_id: int
     cantidad: Decimal = Field(default=Decimal("1.00"), gt=Decimal("0.00"))
     nota: Optional[str] = Field(default=None, max_length=255)
+    periodo: Optional[str] = Field(default=None, max_length=7)
 
 
 class ClienteArticuloOut(BaseModel):
@@ -149,6 +155,7 @@ class ClienteArticuloOut(BaseModel):
     cantidad: Decimal
     subtotal_actual: Decimal
     nota: Optional[str] = None
+    periodo: Optional[str] = None
     estado: str
     fecha_creacion: datetime
     usuario_nombre: Optional[str] = None
@@ -162,10 +169,12 @@ class ClienteArticuloOut(BaseModel):
 class LiquidarArticulosRequest(BaseModel):
     articulo_ids: Optional[List[int]] = Field(default=None, description="IDs específicos a liquidar o None para todos los pendientes")
     nota_adicional: Optional[str] = Field(default=None, max_length=100)
+    periodo: Optional[str] = Field(default=None, max_length=7)
 
 
 class CerrarMesRequest(BaseModel):
     nota_cierre: Optional[str] = Field(default=None, max_length=150)
+    periodo: Optional[str] = Field(default=None, max_length=7)
 
 
 class CerrarMesResponse(BaseModel):

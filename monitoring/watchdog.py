@@ -105,20 +105,37 @@ def obtener_contenedores_docker(socket_path: str = "/var/run/docker.sock") -> di
     return resultado
 
 
-def verificar_api_health(url: str, timeout: int = 5) -> tuple[bool, str]:
-    """Verifica el endpoint HTTP /api/health de la app FastAPI."""
+def formatear_pesos_arg(valor_str: str | float | int) -> str:
+    """Formatea un número o cadena al formato monetario argentino ($12.500,00)."""
+    try:
+        val = float(valor_str)
+    except Exception:
+        return f"${valor_str}"
+    signo = "-" if val < 0 else ""
+    partes = f"{abs(val):,.2f}".split(".")
+    entero = partes[0].replace(",", ".")
+    return f"{signo}${entero},{partes[1]}"
+
+
+def verificar_api_health(url: str, timeout: int = 5) -> tuple[bool, str, dict | None]:
+    """Verifica el endpoint HTTP /api/health de la app FastAPI y devuelve también el JSON de resumen."""
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "FiadosWatchdog/1.0"})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             body = resp.read().decode("utf-8", errors="ignore")
             if resp.status == 200:
-                return True, "HTTP 200 OK (App + DB operativas)"
-            return False, f"HTTP {resp.status}: {body[:120]}"
+                datos_json = None
+                try:
+                    datos_json = json.loads(body)
+                except Exception:
+                    pass
+                return True, "HTTP 200 OK (App + DB operativas)", datos_json
+            return False, f"HTTP {resp.status}: {body[:120]}", None
     except urllib.error.HTTPError as http_err:
         body = http_err.read().decode("utf-8", errors="ignore")
-        return False, f"HTTP {http_err.code} (Fallo interno/DB): {body[:120]}"
+        return False, f"HTTP {http_err.code} (Fallo interno/DB): {body[:120]}", None
     except Exception as exc:
-        return False, f"Sin respuesta en {url} ({exc})"
+        return False, f"Sin respuesta en {url} ({exc})", None
 
 
 def enviar_webhook(
@@ -212,12 +229,39 @@ def lista_contenedores_monitoreados() -> list[str]:
     return base
 
 
+def enviar_resumen_diario_webhook(webhook_url: str, resumen: dict) -> bool:
+    """Envía el Resumen Diario de Cierre al canal de Discord o Slack."""
+    fecha = resumen.get("fecha") or datetime.now(TZ_ARGENTINA).strftime("%d/%m/%Y")
+    fiado_hoy = formatear_pesos_arg(resumen.get("fiado_hoy", "0.00"))
+    cant_cargos = resumen.get("cantidad_cargos_hoy", 0)
+    cobrado_hoy = formatear_pesos_arg(resumen.get("cobrado_hoy", "0.00"))
+    cant_pagos = resumen.get("cantidad_pagos_hoy", 0)
+    total_calle = formatear_pesos_arg(resumen.get("total_en_calle", "0.00"))
+    cli_deuda = resumen.get("clientes_con_deuda", 0)
+    envases_pend = resumen.get("envases_prestados_pendientes", 0)
+    cli_envases = resumen.get("clientes_con_envases", 0)
+
+    return enviar_webhook(
+        webhook_url=webhook_url,
+        titulo=f"📊 Resumen Diario de Cierre ({fecha}) - Despensa Snoopy",
+        descripcion="Resumen automático de movimientos del día y estado general de la libreta.",
+        color_hex=0x10B981,
+        campos=[
+            ("🛒 Fiado Hoy", f"**{fiado_hoy}** ({cant_cargos} anotaciones)"),
+            ("💵 Cobrado Hoy", f"**{cobrado_hoy}** ({cant_pagos} cobros)"),
+            ("📌 Total en la Calle", f"**{total_calle}** ({cli_deuda} clientes con saldo)"),
+            ("🍾 Envases Prestados", f"**{envases_pend} envase(s)** pendientes ({cli_envases} clientes)"),
+        ],
+    )
+
+
 def ejecutar_ciclo(
-    estado_previo: dict[str, bool],
+    estado_previo: dict,
     webhook_url: str,
     heartbeat_url: str,
     app_health_url: str,
     socket_path: str,
+    daily_report_hour: int = 22,
 ) -> bool:
     """
     Ejecuta una verificación completa de contenedores y API.
@@ -274,7 +318,12 @@ def ejecutar_ciclo(
 
     # Verificar endpoint /api/health (valida FastAPI + consulta SELECT 1 a PostgreSQL)
     if app_health_url:
-        api_ok, api_detalle = verificar_api_health(app_health_url)
+        res_health = verificar_api_health(app_health_url)
+        if len(res_health) == 3:
+            api_ok, api_detalle, health_json = res_health
+        else:
+            api_ok, api_detalle = res_health
+            health_json = None
         if not api_ok:
             todo_sano = False
 
@@ -306,6 +355,48 @@ def ejecutar_ciclo(
             )
         estado_previo["endpoint_api_health"] = api_ok
 
+        # Procesar notificaciones automáticas de Resumen Diario (22:00 hs) y Cierre de Mes Automático
+        if api_ok and health_json and isinstance(health_json.get("resumen_diario"), dict):
+            resumen_diario = health_json["resumen_diario"]
+            ahora_arg = datetime.now(TZ_ARGENTINA)
+            fecha_hoy_str = ahora_arg.strftime("%Y-%m-%d")
+
+            # 1. Notificación si hubo Cierre de Mes Automático con productos/fichas liquidadas
+            cierre_auto = resumen_diario.get("cierre_automatico") or {}
+            periodo_auto = cierre_auto.get("periodo_activo_actual")
+            if (
+                cierre_auto.get("ejecutado")
+                and periodo_auto
+                and estado_previo.get("ultimo_cierre_notificado") != periodo_auto
+            ):
+                arts_liq = cierre_auto.get("articulos_liquidados_count", 0)
+                cli_av = cierre_auto.get("clientes_avanzados_count", 0)
+                tot_liq = formatear_pesos_arg(cierre_auto.get("total_articulos_liquidados", "0.00"))
+                if arts_liq > 0 or cli_av > 0:
+                    enviar_webhook(
+                        webhook_url=webhook_url,
+                        titulo=f"📅 Cierre de Mes Automático Completado ({periodo_auto})",
+                        descripcion=(
+                            "Al cambiar el mes calendario, el sistema cerró automáticamente las fichas "
+                            "del mes anterior, sumó las garrafas/productos pendientes y abrió la nueva ficha mensual."
+                        ),
+                        color_hex=0x3498DB,
+                        campos=[
+                            ("Nuevo Período Activo", f"`{periodo_auto}`"),
+                            ("Fichas de clientes actualizadas", f"{cli_av} cliente(s)"),
+                            ("Garrafas/Productos liquidados", f"{arts_liq} artículo(s) ({tot_liq})"),
+                        ],
+                    )
+                estado_previo["ultimo_cierre_notificado"] = periodo_auto
+
+            # 2. Resumen Diario Automático a la hora configurada (por defecto 22:00 hs ARG)
+            if (
+                ahora_arg.hour == daily_report_hour
+                and estado_previo.get("ultimo_resumen_diario_fecha") != fecha_hoy_str
+            ):
+                enviar_resumen_diario_webhook(webhook_url, resumen_diario)
+                estado_previo["ultimo_resumen_diario_fecha"] = fecha_hoy_str
+
     # Enviar latido al Dead Man's Switch externo (Healthchecks.io / Uptime Kuma)
     if heartbeat_url:
         enviar_heartbeat(heartbeat_url, exito=todo_sano)
@@ -327,6 +418,11 @@ def main() -> int:
         action="store_true",
         help="Ejecuta una sola comprobación y termina.",
     )
+    parser.add_argument(
+        "--send-daily-report",
+        action="store_true",
+        help="Consulta /api/health y envía inmediatamente el Resumen Diario al Webhook.",
+    )
     args = parser.parse_args()
 
     webhook_url = os.getenv("MONITOR_WEBHOOK_URL", "").strip()
@@ -334,7 +430,20 @@ def main() -> int:
     app_health_url = os.getenv("APP_HEALTH_URL", "http://app:8000/api/health").strip()
     socket_path = os.getenv("DOCKER_SOCKET_PATH", "/var/run/docker.sock").strip()
     interval = int(os.getenv("MONITOR_INTERVAL_SECONDS", "30"))
+    daily_report_hour = int(os.getenv("DAILY_REPORT_HOUR", "22"))
     notify_startup = os.getenv("MONITOR_NOTIFY_ON_STARTUP", "true").lower() in ("true", "1", "yes", "si")
+
+    if args.send_daily_report:
+        api_ok, detalle, health_json = verificar_api_health(app_health_url)
+        if not api_ok or not health_json or "resumen_diario" not in health_json:
+            print(f"❌ No se pudo obtener el resumen diario desde {app_health_url}: {detalle}")
+            return 1
+        ok = enviar_resumen_diario_webhook(webhook_url, health_json["resumen_diario"])
+        if ok:
+            print("✅ Resumen diario enviado con éxito.")
+            return 0
+        print("❌ Falló el envío del resumen diario al Webhook.")
+        return 1
 
     if args.test_webhook:
         if not webhook_url or webhook_url.startswith("pegar_aqui"):
@@ -378,10 +487,12 @@ def main() -> int:
             ],
         )
 
-    estado_previo: dict[str, bool] = {}
+    estado_previo: dict = {}
 
     if args.once:
-        sano = ejecutar_ciclo(estado_previo, webhook_url, heartbeat_url, app_health_url, socket_path)
+        sano = ejecutar_ciclo(
+            estado_previo, webhook_url, heartbeat_url, app_health_url, socket_path, daily_report_hour
+        )
         return 0 if sano else 1
 
     # Pequeña espera inicial para dar tiempo a que fiados_app termine de levantar
@@ -389,7 +500,9 @@ def main() -> int:
 
     while True:
         try:
-            ejecutar_ciclo(estado_previo, webhook_url, heartbeat_url, app_health_url, socket_path)
+            ejecutar_ciclo(
+                estado_previo, webhook_url, heartbeat_url, app_health_url, socket_path, daily_report_hour
+            )
         except Exception as exc:
             print(f"[{ahora_str()}] [ERROR] Excepción en ciclo del watchdog: {exc}", flush=True)
         time.sleep(interval)

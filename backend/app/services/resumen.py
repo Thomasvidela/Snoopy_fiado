@@ -9,11 +9,19 @@ from app.models import (
     Cliente,
     ClienteArticulo,
     EstadoArticulo,
+    EstadoEnvase,
     Movimiento,
+    PrestamoEnvase,
     TipoMovimiento,
     obtener_periodo_activo_cliente,
 )
-from app.schemas import ClienteArticuloOut, ClienteOut, MovimientoOut, ResumenMensualOut
+from app.schemas import (
+    ClienteArticuloOut,
+    ClienteOut,
+    MovimientoOut,
+    PrestamoEnvaseOut,
+    ResumenMensualOut,
+)
 
 MESES_ES = {
     1: "Enero",
@@ -210,6 +218,58 @@ class ResumenService:
                 + f"\n- Subtotal productos: {formatear_pesos(total_articulos)}\n"
             )
 
+        # Envases retornables prestados pendientes de devolución
+        envases_pendientes_db = (
+            db.query(PrestamoEnvase)
+            .filter(
+                PrestamoEnvase.cliente_id == cliente_id,
+                PrestamoEnvase.estado == EstadoEnvase.PRESTADO
+            )
+            .order_by(PrestamoEnvase.fecha_prestamo.asc())
+            .all()
+        )
+
+        envases_out: List[PrestamoEnvaseOut] = []
+        lineas_envases: List[str] = []
+        envases_resumen_cliente: List[str] = []
+        envases_count_cliente = 0
+
+        for env in envases_pendientes_db:
+            pend = max(0, (env.cantidad or 0) - (env.cantidad_devuelta or 0))
+            if pend <= 0:
+                continue
+            envases_count_cliente += pend
+            envases_resumen_cliente.append(f"{pend}x {env.descripcion}")
+            envases_out.append(
+                PrestamoEnvaseOut(
+                    id=env.id,
+                    cliente_id=env.cliente_id,
+                    cliente_nombre=cliente.nombre,
+                    usuario_id=env.usuario_id,
+                    operador_nombre=env.operador.nombre if env.operador else None,
+                    descripcion=env.descripcion,
+                    cantidad=env.cantidad,
+                    cantidad_devuelta=env.cantidad_devuelta,
+                    cantidad_pendiente=pend,
+                    nota=env.nota,
+                    estado=env.estado.value,
+                    fecha_prestamo=env.fecha_prestamo,
+                    fecha_devolucion=env.fecha_devolucion,
+                    devuelto_por_nombre=env.devuelto_por.nombre if env.devuelto_por else None,
+                )
+            )
+            fecha_env_str = env.fecha_prestamo.strftime("%d/%m")
+            nota_env_str = f" ({env.nota})" if env.nota else ""
+            lineas_envases.append(f"• {pend}x {env.descripcion} (prestado el {fecha_env_str}){nota_env_str}")
+
+        bloque_envases_txt = ""
+        if lineas_envases:
+            bloque_envases_txt = (
+                f"\n*Envases prestados pendientes de devolución:*\n"
+                + "\n".join(lineas_envases)
+                + "\n"
+            )
+
         texto_whatsapp = (
             f"*Despensa Snoopy*\n"
             f"*Cliente:* {cliente.nombre}{alias_texto}\n"
@@ -223,7 +283,8 @@ class ResumenService:
             f"*TOTAL DEL MES ({nombre_mes}): {formatear_pesos(saldo_total_con_articulos)}*\n"
             f"--------------------------------\n\n"
             f"*Detalle de movimientos del mes:*\n"
-            f"{bloque_detalle}\n\n"
+            f"{bloque_detalle}\n"
+            f"{bloque_envases_txt}\n"
             f"¡Muchas gracias por su compra!"
         )
 
@@ -240,7 +301,9 @@ class ResumenService:
                 periodo_actual=periodo_activo,
                 total_articulos_pendientes=total_articulos,
                 articulos_pendientes_count=len(articulos_pendientes_db),
-                saldo_total=saldo_total_con_articulos
+                saldo_total=saldo_total_con_articulos,
+                envases_pendientes_count=envases_count_cliente,
+                envases_pendientes_resumen=envases_resumen_cliente,
             ),
             periodo=periodo,
             saldo_anterior=saldo_anterior,
@@ -251,5 +314,6 @@ class ResumenService:
             articulos_pendientes=articulos_out,
             total_articulos_pendientes=total_articulos,
             saldo_total_con_articulos=saldo_total_con_articulos,
+            envases_pendientes=envases_out,
             texto_whatsapp=texto_whatsapp
         )

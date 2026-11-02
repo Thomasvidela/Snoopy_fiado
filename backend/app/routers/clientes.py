@@ -12,6 +12,7 @@ from app.models import (
     Cliente,
     ClienteArticulo,
     EstadoArticulo,
+    EstadoEnvase,
     Movimiento,
     TipoMovimiento,
     Usuario,
@@ -28,6 +29,7 @@ from app.schemas import (
     ListadoClientesResponse,
     ResumenMensualOut,
 )
+from app.services.cierre_mensual import CierreMensualService
 from app.services.excel import generar_excel_cliente
 from app.services.ledger import LedgerService, _lock_query, normalizar_telefono_argentina
 from app.services.resumen import MESES_ES, ResumenService, parse_periodo
@@ -44,6 +46,16 @@ def _map_cliente_out(cliente: Cliente) -> ClienteOut:
                 count_articulos += 1
                 total_articulos += art.cantidad * art.producto.precio_actual
 
+    envases_count = 0
+    envases_resumen: list[str] = []
+    if hasattr(cliente, "envases_prestados") and cliente.envases_prestados:
+        for env in cliente.envases_prestados:
+            if env.estado == EstadoEnvase.PRESTADO:
+                pend = max(0, (env.cantidad or 0) - (env.cantidad_devuelta or 0))
+                if pend > 0:
+                    envases_count += pend
+                    envases_resumen.append(f"{pend}x {env.descripcion}")
+
     saldo_total = cliente.saldo_actual + total_articulos
 
     return ClienteOut(
@@ -58,7 +70,9 @@ def _map_cliente_out(cliente: Cliente) -> ClienteOut:
         periodo_actual=obtener_periodo_activo_cliente(cliente),
         total_articulos_pendientes=total_articulos,
         articulos_pendientes_count=count_articulos,
-        saldo_total=saldo_total
+        saldo_total=saldo_total,
+        envases_pendientes_count=envases_count,
+        envases_pendientes_resumen=envases_resumen,
     )
 
 
@@ -74,7 +88,9 @@ def listar_clientes(
     """
     Lista clientes ordenados por última actividad descendente.
     Soporta búsqueda instantánea por nombre o apodo.
+    Verifica automáticamente si cambió el mes calendario para cerrar fichas vencidas.
     """
+    CierreMensualService.verificar_y_cerrar_periodos_vencidos(db)
     query = db.query(Cliente)
 
     if solo_activos is not None:
@@ -92,7 +108,10 @@ def listar_clientes(
     total = query.count()
     items = (
         query
-        .options(selectinload(Cliente.articulos).selectinload(ClienteArticulo.producto))
+        .options(
+            selectinload(Cliente.articulos).selectinload(ClienteArticulo.producto),
+            selectinload(Cliente.envases_prestados),
+        )
         .order_by(Cliente.ultima_actividad.desc(), Cliente.id.desc())
         .offset(offset)
         .limit(limite)
@@ -125,7 +144,10 @@ def obtener_cliente(
     """Obtiene los detalles y saldo actual de un cliente."""
     cliente = (
         db.query(Cliente)
-        .options(selectinload(Cliente.articulos).selectinload(ClienteArticulo.producto))
+        .options(
+            selectinload(Cliente.articulos).selectinload(ClienteArticulo.producto),
+            selectinload(Cliente.envases_prestados),
+        )
         .filter(Cliente.id == cliente_id)
         .first()
     )

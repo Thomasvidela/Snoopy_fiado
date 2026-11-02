@@ -69,6 +69,8 @@ class ClienteOut(BaseModel):
     total_articulos_pendientes: Decimal = Decimal("0.00")
     articulos_pendientes_count: int = 0
     saldo_total: Decimal = Decimal("0.00")
+    envases_pendientes_count: int = 0
+    envases_pendientes_resumen: List[str] = []
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -199,4 +201,69 @@ class ResumenMensualOut(BaseModel):
     articulos_pendientes: List[ClienteArticuloOut] = []
     total_articulos_pendientes: Decimal = Decimal("0.00")
     saldo_total_con_articulos: Decimal = Decimal("0.00")
+    envases_pendientes: List["PrestamoEnvaseOut"] = []
     texto_whatsapp: str
+
+
+# --- Préstamo de Envases Retornables (Garrafa, Cerveza, Gaseosa) ---
+class PrestamoEnvaseCreate(BaseModel):
+    descripcion: str = Field(..., min_length=2, max_length=120)
+    cantidad: int = Field(default=1, ge=1, le=100)
+    nota: Optional[str] = Field(default=None, max_length=255)
+
+
+class DevolverEnvaseRequest(BaseModel):
+    cantidad_devuelta: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=100,
+        description="Cantidad que devuelve ahora (si es None, devuelve todos los pendientes de ese préstamo)"
+    )
+
+
+class PrestamoEnvaseOut(BaseModel):
+    id: int
+    cliente_id: int
+    cliente_nombre: Optional[str] = None
+    usuario_id: int
+    operador_nombre: Optional[str] = None
+    descripcion: str
+    cantidad: int
+    cantidad_devuelta: int
+    cantidad_pendiente: int
+    nota: Optional[str] = None
+    estado: str
+    fecha_prestamo: datetime
+    fecha_devolucion: Optional[datetime] = None
+    devuelto_por_nombre: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# --- Resumen Diario y Cierre Automático ---
+class CierreAutomaticoInfoOut(BaseModel):
+    ejecutado: bool = False
+    periodo_activo_actual: str
+    ultimo_cierre_timestamp: Optional[datetime] = None
+    clientes_avanzados_count: int = 0
+    articulos_liquidados_count: int = 0
+    total_articulos_liquidados: Decimal = Decimal("0.00")
+
+
+class ResumenDiarioOut(BaseModel):
+    fecha: str
+    periodo_actual: str
+    fiado_hoy: Decimal
+    cantidad_cargos_hoy: int
+    cobrado_hoy: Decimal
+    cantidad_pagos_hoy: int
+    total_en_calle: Decimal
+    clientes_con_deuda: int
+    total_articulos_pendientes_valor: Decimal
+    articulos_pendientes_unidades: int
+    envases_prestados_pendientes: int
+    clientes_con_envases: int
+    ultimos_movimientos_hoy: List[MovimientoOut] = []
+    envases_en_calle_detalle: List[PrestamoEnvaseOut] = []
+    cierre_automatico: CierreAutomaticoInfoOut
+

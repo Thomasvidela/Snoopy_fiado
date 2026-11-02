@@ -114,6 +114,12 @@ class Cliente(Base):
         back_populates="cliente",
         order_by="desc(ClienteArticulo.fecha_creacion)"
     )
+    envases_prestados: Mapped[List["PrestamoEnvase"]] = relationship(
+        "PrestamoEnvase",
+        foreign_keys="PrestamoEnvase.cliente_id",
+        back_populates="cliente",
+        order_by="desc(PrestamoEnvase.fecha_prestamo)"
+    )
 
 
 class Movimiento(Base):
@@ -212,4 +218,35 @@ class ClienteArticulo(Base):
     producto: Mapped["Producto"] = relationship("Producto", back_populates="articulos")
     operador: Mapped["Usuario"] = relationship("Usuario")
     movimiento: Mapped[Optional["Movimiento"]] = relationship("Movimiento")
+
+
+class EstadoEnvase(str, PyEnum):
+    PRESTADO = "PRESTADO"
+    DEVUELTO = "DEVUELTO"
+
+
+class PrestamoEnvase(Base):
+    __tablename__ = "prestamos_envases"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    cliente_id: Mapped[int] = mapped_column(ForeignKey("clientes.id"), nullable=False, index=True)
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), nullable=False)
+    descripcion: Mapped[str] = mapped_column(String(120), nullable=False)
+    cantidad: Mapped[int] = mapped_column(nullable=False, default=1)
+    cantidad_devuelta: Mapped[int] = mapped_column(nullable=False, default=0)
+    nota: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    estado: Mapped[EstadoEnvase] = mapped_column(
+        Enum(EstadoEnvase, name="estado_envase"),
+        default=EstadoEnvase.PRESTADO,
+        index=True,
+        nullable=False
+    )
+    fecha_prestamo: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+    fecha_devolucion: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    devuelto_por_id: Mapped[Optional[int]] = mapped_column(ForeignKey("usuarios.id"), nullable=True)
+
+    cliente: Mapped["Cliente"] = relationship("Cliente", back_populates="envases_prestados")
+    operador: Mapped["Usuario"] = relationship("Usuario", foreign_keys=[usuario_id])
+    devuelto_por: Mapped[Optional["Usuario"]] = relationship("Usuario", foreign_keys=[devuelto_por_id])
+
 

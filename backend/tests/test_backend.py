@@ -531,4 +531,135 @@ def test_health_check_y_watchdog_transiciones(client, monkeypatch):
     assert heartbeats_enviados[-1] is True
 
 
+def get_auth_headers(client):
+    store_headers = {"x-store-key": "Despensa.Snoopy1980"}
+    operadores = client.get("/api/auth/operadores", headers=store_headers).json()
+    admin = next(o for o in operadores if o["nombre"] == "Administrador")
+    token = client.post(
+        "/api/auth/login",
+        json={"usuario_id": admin["id"], "pin": "1111"},
+        headers=store_headers,
+    ).json()["access_token"]
+    return {"Authorization": f"Bearer {token}", "x-store-key": "Despensa.Snoopy1980"}
+
+
+def test_prestamo_y_devolucion_envases_retornables(client):
+    headers = get_auth_headers(client)
+
+    # 1. Crear cliente con teléfono
+    resp_cli = client.post(
+        "/api/clientes",
+        json={"nombre": "Marta Gómez", "apodo": "Martita", "telefono": "1144556677"},
+        headers=headers,
+    )
+    assert resp_cli.status_code == 201
+    cliente_id = resp_cli.json()["id"]
+
+    # 2. Prestar 2 envases de Cerveza 1L y 1 Envase Garrafa 10kg
+    resp_env1 = client.post(
+        f"/api/clientes/{cliente_id}/envases",
+        json={"descripcion": "Envase Cerveza 1L", "cantidad": 2, "nota": "Quilmes"},
+        headers=headers,
+    )
+    assert resp_env1.status_code == 201
+    env1 = resp_env1.json()
+    assert env1["cantidad"] == 2
+    assert env1["cantidad_pendiente"] == 2
+    assert env1["estado"] == "PRESTADO"
+
+    resp_env2 = client.post(
+        f"/api/clientes/{cliente_id}/envases",
+        json={"descripcion": "Envase Garrafa 10kg", "cantidad": 1},
+        headers=headers,
+    )
+    assert resp_env2.status_code == 201
+    env2 = resp_env2.json()
+
+    # 3. Verificar que el cliente refleje 3 envases pendientes en su ficha y listado
+    cli_info = client.get(f"/api/clientes/{cliente_id}", headers=headers).json()
+    assert cli_info["envases_pendientes_count"] == 3
+    assert len(cli_info["envases_pendientes_resumen"]) == 2
+
+    # 4. Verificar que el resumen de WhatsApp incluya el recordatorio de los envases prestados
+    resumen_wa = client.get(f"/api/clientes/{cliente_id}/resumen", headers=headers).json()
+    assert "Envases prestados pendientes de devolución" in resumen_wa["texto_whatsapp"]
+    assert "2x Envase Cerveza 1L" in resumen_wa["texto_whatsapp"]
+    assert "1x Envase Garrafa 10kg" in resumen_wa["texto_whatsapp"]
+
+    # 5. Devolución parcial: devuelve 1 de los 2 envases de cerveza
+    resp_dev_parcial = client.post(
+        f"/api/envases/{env1['id']}/devolver",
+        json={"cantidad_devuelta": 1},
+        headers=headers,
+    )
+    assert resp_dev_parcial.status_code == 200
+    dev_p = resp_dev_parcial.json()
+    assert dev_p["cantidad_devuelta"] == 1
+    assert dev_p["cantidad_pendiente"] == 1
+    assert dev_p["estado"] == "PRESTADO"
+
+    cli_info2 = client.get(f"/api/clientes/{cliente_id}", headers=headers).json()
+    assert cli_info2["envases_pendientes_count"] == 2
+
+    # 6. Devolución total del resto de los envases
+    resp_dev_total1 = client.post(f"/api/envases/{env1['id']}/devolver", headers=headers)
+    assert resp_dev_total1.status_code == 200
+    assert resp_dev_total1.json()["estado"] == "DEVUELTO"
+    assert resp_dev_total1.json()["cantidad_pendiente"] == 0
+
+    resp_dev_total2 = client.post(f"/api/envases/{env2['id']}/devolver", headers=headers)
+    assert resp_dev_total2.status_code == 200
+    assert resp_dev_total2.json()["estado"] == "DEVUELTO"
+
+    cli_info3 = client.get(f"/api/clientes/{cliente_id}", headers=headers).json()
+    assert cli_info3["envases_pendientes_count"] == 0
+
+
+def test_cierre_mensual_automatico_y_resumen_diario(client):
+    headers = get_auth_headers(client)
+
+    # 1. Crear producto dinámico (Garrafa 10kg a $15.000)
+    resp_prod = client.post(
+        "/api/productos",
+        json={"nombre": "Garrafa Especial 10kg", "precio_actual": "15000.00", "unidad": "garrafa"},
+        headers=headers,
+    )
+    assert resp_prod.status_code == 201
+    prod_id = resp_prod.json()["id"]
+
+    # 2. Crear cliente y anotarle una garrafa en un período anterior (ej. '2026-09')
+    resp_cli = client.post(
+        "/api/clientes",
+        json={"nombre": "Roberto Sánchez", "apodo": "Beto"},
+        headers=headers,
+    )
+    assert resp_cli.status_code == 201
+    cliente_id = resp_cli.json()["id"]
+
+    resp_art = client.post(
+        f"/api/clientes/{cliente_id}/articulos",
+        json={"producto_id": prod_id, "cantidad": "2", "periodo": "2026-09", "nota": "Cierre auto test"},
+        headers=headers,
+    )
+    assert resp_art.status_code == 201
+
+    # 3. Al consultar el resumen diario (o listado de clientes), el cierre automático detecta
+    # que '2026-09' es anterior al mes actual y liquida automáticamente las 2 garrafas ($30.000)
+    resp_resumen_diario = client.get("/api/reportes/resumen-diario", headers=headers)
+    assert resp_resumen_diario.status_code == 200
+    datos_diarios = resp_resumen_diario.json()
+    assert Decimal(datos_diarios["fiado_hoy"]) >= Decimal("30000.00")
+
+    # 4. Verificar que el cliente ahora tiene el saldo de $30.000 liquidado en la ficha 2026-09
+    # y 0 artículos pendientes
+    cli_actualizado = client.get(f"/api/clientes/{cliente_id}", headers=headers).json()
+    assert Decimal(cli_actualizado["saldo_actual"]) == Decimal("30000.00")
+    assert cli_actualizado["articulos_pendientes_count"] == 0
+
+    resumen_sep = client.get(f"/api/clientes/{cliente_id}/resumen?mes=2026-09", headers=headers).json()
+    assert Decimal(resumen_sep["saldo_final_periodo"]) == Decimal("30000.00")
+    assert any("cierre automático" in (m["nota"] or "") for m in resumen_sep["movimientos"])
+
+
+
 

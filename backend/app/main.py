@@ -10,17 +10,19 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import Base, SessionLocal, engine, get_db
-from app.routers import auth, clientes, movimientos, productos
+from app.routers import auth, clientes, envases, movimientos, productos
 from app.seed import seed_database
+from app.services.cierre_mensual import CierreMensualService
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Inicialización de base de datos y datos semilla
+    # Inicialización de base de datos, datos semilla y cierre automático de mes si corresponde
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
         seed_database(db)
+        CierreMensualService.verificar_y_cerrar_periodos_vencidos(db, forzar=True)
     finally:
         db.close()
     yield
@@ -62,17 +64,38 @@ app.include_router(auth.router, prefix="/api")
 app.include_router(clientes.router, prefix="/api")
 app.include_router(movimientos.router, prefix="/api")
 app.include_router(productos.router, prefix="/api")
+app.include_router(envases.router, prefix="/api")
 
 
 @app.get("/api/health", tags=["Salud"])
 def health_check(db: Session = Depends(get_db)):
     try:
         db.execute(text("SELECT 1"))
+        resumen = envases.calcular_metricas_resumen_diario(db)
         return {
             "status": "ok",
             "proyecto": settings.PROJECT_NAME,
             "database": engine.dialect.name,
             "db_conectada": True,
+            "resumen_diario": {
+                "fecha": resumen.fecha,
+                "periodo_actual": resumen.periodo_actual,
+                "fiado_hoy": str(resumen.fiado_hoy),
+                "cantidad_cargos_hoy": resumen.cantidad_cargos_hoy,
+                "cobrado_hoy": str(resumen.cobrado_hoy),
+                "cantidad_pagos_hoy": resumen.cantidad_pagos_hoy,
+                "total_en_calle": str(resumen.total_en_calle),
+                "clientes_con_deuda": resumen.clientes_con_deuda,
+                "envases_prestados_pendientes": resumen.envases_prestados_pendientes,
+                "clientes_con_envases": resumen.clientes_con_envases,
+                "cierre_automatico": {
+                    "ejecutado": resumen.cierre_automatico.ejecutado,
+                    "periodo_activo_actual": resumen.cierre_automatico.periodo_activo_actual,
+                    "clientes_avanzados_count": resumen.cierre_automatico.clientes_avanzados_count,
+                    "articulos_liquidados_count": resumen.cierre_automatico.articulos_liquidados_count,
+                    "total_articulos_liquidados": str(resumen.cierre_automatico.total_articulos_liquidados),
+                },
+            },
         }
     except Exception:
         return JSONResponse(

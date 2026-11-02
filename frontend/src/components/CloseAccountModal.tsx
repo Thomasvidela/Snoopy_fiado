@@ -17,6 +17,8 @@ import { PostOperationInfo } from './PostOperationModal';
 interface CloseAccountModalProps {
   isOpen: boolean;
   cliente: Cliente | null;
+  targetPeriodo?: string;
+  saldoFichaLibreta?: number;
   articulosPendientes: ClienteArticulo[];
   onClose: () => void;
   onSuccess: (info: PostOperationInfo, nuevoPeriodoActivo?: string) => Promise<void> | void;
@@ -57,6 +59,8 @@ function obtenerSiguientePeriodo(periodo: string): string {
 export const CloseAccountModal: React.FC<CloseAccountModalProps> = ({
   isOpen,
   cliente,
+  targetPeriodo,
+  saldoFichaLibreta,
   articulosPendientes,
   onClose,
   onSuccess,
@@ -74,16 +78,22 @@ export const CloseAccountModal: React.FC<CloseAccountModalProps> = ({
 
   const now = new Date();
   const mesCalendario = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  const periodoACerrar =
+  const periodoActivoActual =
     cliente.periodo_actual && cliente.periodo_actual > mesCalendario
       ? cliente.periodo_actual
       : mesCalendario;
-  const proximoPeriodo = obtenerSiguientePeriodo(periodoACerrar);
+
+  const periodoACerrar = targetPeriodo || periodoActivoActual;
+  const esCierreDeMesActual = periodoACerrar >= periodoActivoActual;
+  const proximoPeriodo = esCierreDeMesActual
+    ? obtenerSiguientePeriodo(periodoACerrar)
+    : periodoActivoActual;
 
   const labelMesCierre = formatearPeriodoLabel(periodoACerrar);
   const labelMesNuevo = formatearPeriodoLabel(proximoPeriodo);
 
-  const saldoLibreta = parseFloat(cliente.saldo_actual);
+  const saldoLibreta =
+    saldoFichaLibreta !== undefined ? saldoFichaLibreta : parseFloat(cliente.saldo_actual);
   const totalArticulos = articulosPendientes.reduce(
     (acc, a) => acc + parseFloat(a.subtotal_actual),
     0
@@ -95,18 +105,20 @@ export const CloseAccountModal: React.FC<CloseAccountModalProps> = ({
     setError(null);
     setLoading(true);
     try {
-      const res = await api.cerrarMesCliente(cliente.id);
+      const res = await api.cerrarMesCliente(cliente.id, periodoACerrar);
       hapticSuccess();
       onClose();
       await onSuccess(
         {
-          titulo: `¡${labelMesCierre} liquidado!`,
+          titulo: `¡Ficha ${labelMesCierre} liquidada!`,
           detalle:
             res.articulos_liquidados_count > 0
-              ? `Se sumaron ${res.articulos_liquidados_count} producto(s) al precio de hoy y se abrió la pestaña ${labelMesNuevo} para próximos fiados`
-              : `Se cerró la pestaña ${labelMesCierre} en ${formatCurrency(
+              ? `Se sumaron ${res.articulos_liquidados_count} producto(s) al cierre de ${labelMesCierre} y el total del mes quedó en ${formatCurrency(
                   res.saldo_cierre
-                )} y se habilitó ${labelMesNuevo} para próximos fiados`,
+                )}`
+              : `La ficha de ${labelMesCierre} quedó cerrada en ${formatCurrency(
+                  res.saldo_cierre
+                )} y se habilitó ${labelMesNuevo}`,
           monto: res.saldo_cierre,
           esCargo: true,
         },
@@ -137,7 +149,9 @@ export const CloseAccountModal: React.FC<CloseAccountModalProps> = ({
           </div>
           <div>
             <h2 className="text-base sm:text-lg font-extrabold text-white">
-              Liquidar / Cerrar Mes
+              {esCierreDeMesActual
+                ? `Liquidar / Cerrar Ficha ${labelMesCierre}`
+                : `Sumar Productos al Cierre de ${labelMesCierre}`}
             </h2>
             <p className="text-xs text-slate-400">
               Cliente: <strong className="text-white">{cliente.nombre}</strong>
@@ -149,32 +163,34 @@ export const CloseAccountModal: React.FC<CloseAccountModalProps> = ({
         </div>
 
         {/* Transición de Pestañas de Mes */}
-        <div className="grid grid-cols-11 items-center gap-2 bg-slate-900/80 border border-slate-700/70 rounded-xl p-3 mb-4">
-          <div className="col-span-5 bg-slate-800/90 border border-slate-700 rounded-lg p-2.5 text-center">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 block">
-              Se cierra pestaña
-            </span>
-            <span className="text-xs sm:text-sm font-extrabold text-white mt-0.5 block">
-              {labelMesCierre}
-            </span>
+        {esCierreDeMesActual && (
+          <div className="grid grid-cols-11 items-center gap-2 bg-slate-900/80 border border-slate-700/70 rounded-xl p-3 mb-4">
+            <div className="col-span-5 bg-slate-800/90 border border-slate-700 rounded-lg p-2.5 text-center">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 block">
+                Se cierra ficha
+              </span>
+              <span className="text-xs sm:text-sm font-extrabold text-white mt-0.5 block">
+                {labelMesCierre}
+              </span>
+            </div>
+            <div className="col-span-1 flex justify-center text-emerald-400">
+              <ArrowRight className="w-4 h-4" />
+            </div>
+            <div className="col-span-5 bg-emerald-950/30 border border-emerald-500/40 rounded-lg p-2.5 text-center">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 block">
+                Nueva ficha en $0,00
+              </span>
+              <span className="text-xs sm:text-sm font-extrabold text-emerald-200 mt-0.5 block">
+                {labelMesNuevo}
+              </span>
+            </div>
           </div>
-          <div className="col-span-1 flex justify-center text-emerald-400">
-            <ArrowRight className="w-4 h-4" />
-          </div>
-          <div className="col-span-5 bg-emerald-950/30 border border-emerald-500/40 rounded-lg p-2.5 text-center">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 block">
-              Nueva pestaña activa
-            </span>
-            <span className="text-xs sm:text-sm font-extrabold text-emerald-200 mt-0.5 block">
-              {labelMesNuevo}
-            </span>
-          </div>
-        </div>
+        )}
 
-        {/* Desglose del Cierre */}
+        {/* Desglose del Cierre de la Ficha */}
         <div className="bg-slate-900/90 border border-slate-700/80 rounded-2xl p-4 space-y-2.5 mb-4">
           <div className="flex items-center justify-between text-xs text-slate-300">
-            <span>Saldo acumulado en libreta:</span>
+            <span>Subtotal compras/pagos en ficha {labelMesCierre}:</span>
             <span className="font-bold text-white">{formatCurrency(saldoLibreta)}</span>
           </div>
 
@@ -183,7 +199,7 @@ export const CloseAccountModal: React.FC<CloseAccountModalProps> = ({
               <div className="flex items-center justify-between text-xs text-amber-300 font-semibold">
                 <span className="flex items-center gap-1.5">
                   <Package className="w-3.5 h-3.5" />
-                  Productos que se fijan al precio de hoy ({articulosPendientes.length}):
+                  Productos que se suman al cierre hoy ({articulosPendientes.length}):
                 </span>
                 <span>+{formatCurrency(totalArticulos)}</span>
               </div>
@@ -207,7 +223,7 @@ export const CloseAccountModal: React.FC<CloseAccountModalProps> = ({
 
           <div className="pt-2.5 border-t border-slate-700 flex items-center justify-between">
             <span className="text-xs sm:text-sm font-bold uppercase tracking-wide text-slate-200">
-              Total de Cierre ({labelMesCierre}):
+              Total Final Ficha {labelMesCierre}:
             </span>
             <span className="text-lg sm:text-xl font-extrabold text-rose-400">
               {formatCurrency(totalConsolidado)}
@@ -215,23 +231,22 @@ export const CloseAccountModal: React.FC<CloseAccountModalProps> = ({
           </div>
         </div>
 
-        {/* Explicación clara del flujo sin pedir pago ahora */}
+        {/* Explicación clara */}
         <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-700/60 text-xs text-slate-300 space-y-1.5 mb-4">
           <div className="flex items-start gap-2">
             <Info className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
             <div className="space-y-1 leading-relaxed">
               <p>
-                • La pestaña <strong className="text-white">{labelMesCierre}</strong> quedará{' '}
-                <strong className="text-amber-300">cerrada</strong> con este total final de{' '}
+                • Todos los productos anotados en <strong className="text-white">{labelMesCierre}</strong> se suman ahora al precio vigente, dejando el total de la ficha en{' '}
                 <strong className="text-white">{formatCurrency(totalConsolidado)}</strong>.
               </p>
+              {esCierreDeMesActual && (
+                <p>
+                  • Se abre la nueva ficha <strong className="text-emerald-300">{labelMesNuevo}</strong> desde <strong className="text-white">$0,00</strong> de forma separada para los próximos fiados.
+                </p>
+              )}
               <p>
-                • Los próximos fiados que lleve el cliente (incluso hoy mismo) se anotarán en la nueva pestaña{' '}
-                <strong className="text-emerald-300">{labelMesNuevo}</strong>.
-              </p>
-              <p>
-                • <strong className="text-white">No hace falta cargar el pago ahora:</strong> cuando el cliente venga a abonar (hoy o en unos días), simplemente usás el botón{' '}
-                <strong className="text-emerald-400">Cobrar</strong>.
+                • Cuando el cliente abone <strong className="text-white">{labelMesCierre}</strong>, podés entrar a su pestaña y tocar <strong className="text-emerald-400">Cobrar</strong> para cargarle el pago en ese mes.
               </p>
             </div>
           </div>
@@ -260,7 +275,11 @@ export const CloseAccountModal: React.FC<CloseAccountModalProps> = ({
             >
               <CalendarCheck className="w-4 h-4 shrink-0" />
               <span>
-                {loading ? 'Cerrando mes...' : `Cerrar ${labelMesCierre}`}
+                {loading
+                  ? 'Procesando cierre...'
+                  : esCierreDeMesActual
+                  ? `Cerrar y Liquidar ${labelMesCierre}`
+                  : `Sumar al Cierre de ${labelMesCierre}`}
               </span>
             </button>
           </div>

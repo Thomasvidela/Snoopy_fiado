@@ -8,6 +8,7 @@ import {
   LoginResponse,
   Movimiento,
   MovimientoCreatePayload,
+  MovimientoUpdatePayload,
   Operador,
   OperadorCreatePayload,
   Producto,
@@ -166,10 +167,10 @@ export const api = {
     if (mes) params.set('mes', mes);
     return apiRequest<ResumenMensual>(`/clientes/${clienteId}/resumen?${params.toString()}`);
   },
-  cerrarMesCliente: (clienteId: number, nota_cierre?: string) =>
+  cerrarMesCliente: (clienteId: number, periodo?: string, nota_cierre?: string) =>
     apiRequest<CerrarMesResponse>(`/clientes/${clienteId}/cerrar-mes`, {
       method: 'POST',
-      body: JSON.stringify({ nota_cierre }),
+      body: JSON.stringify({ periodo, nota_cierre }),
     }),
 
   // Movimientos
@@ -178,6 +179,11 @@ export const api = {
   createMovimiento: (clienteId: number, payload: MovimientoCreatePayload) =>
     apiRequest<Movimiento>(`/clientes/${clienteId}/movimientos`, {
       method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateMovimiento: (movimientoId: number, payload: MovimientoUpdatePayload) =>
+    apiRequest<Movimiento>(`/movimientos/${movimientoId}`, {
+      method: 'PUT',
       body: JSON.stringify(payload),
     }),
   anularMovimiento: (movimientoId: number) =>
@@ -243,7 +249,7 @@ export const api = {
     }),
   liquidarClienteArticulos: (
     clienteId: number,
-    payload: { articulo_ids?: number[]; nota_adicional?: string } = {}
+    payload: { articulo_ids?: number[]; nota_adicional?: string; periodo?: string } = {}
   ) =>
     apiRequest<{
       ok: boolean;

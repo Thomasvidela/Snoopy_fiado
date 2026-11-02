@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   ArrowLeft,
   Phone,
@@ -13,16 +13,14 @@ import {
   MoreVertical,
   Edit3,
   Package,
-  Trash2,
-  Check,
   ChevronDown,
   ChevronUp,
   Search,
   X,
   Calculator,
 } from 'lucide-react';
-import { Cliente, Movimiento, ClienteArticulo } from '../types';
-import { MovementList } from './MovementList';
+import { Cliente, Movimiento, ClienteArticulo, MovimientoUpdatePayload } from '../types';
+import { MovementList, getPeriodoLabel } from './MovementList';
 import { EditClientModal } from './EditClientModal';
 import { AddArticleModal } from './AddArticleModal';
 import { CloseAccountModal } from './CloseAccountModal';
@@ -37,9 +35,17 @@ interface ClientDetailProps {
   loadingMovimientos: boolean;
   onBack?: () => void;
   onCloseCliente?: () => void;
-  onOpenMovementModal: (tipo: 'CARGO' | 'PAGO') => void;
+  onOpenMovementModal: (
+    tipo: 'CARGO' | 'PAGO',
+    periodo?: string,
+    saldoFicha?: number
+  ) => void;
   onOpenWhatsAppModal: (periodo?: string) => void;
   onAnularMovimiento: (movimientoId: number) => Promise<void>;
+  onEditarMovimiento?: (
+    movimientoId: number,
+    payload: MovimientoUpdatePayload
+  ) => Promise<void>;
   onToggleActivo?: (clienteId: number) => Promise<void>;
   onUpdateCliente?: (clienteActualizado: Cliente) => void;
   onRefreshClient?: () => Promise<void> | void;
@@ -59,6 +65,7 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
   onOpenMovementModal,
   onOpenWhatsAppModal,
   onAnularMovimiento,
+  onEditarMovimiento,
   onToggleActivo,
   onUpdateCliente,
   onRefreshClient,
@@ -75,10 +82,27 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
   const [addArticleModalOpen, setAddArticleModalOpen] = useState<boolean>(false);
   const [closeAccountModalOpen, setCloseAccountModalOpen] = useState<boolean>(false);
   const [articulos, setArticulos] = useState<ClienteArticulo[]>([]);
-  const [loadingArticulos, setLoadingArticulos] = useState<boolean>(false);
-  const [liquidando, setLiquidando] = useState<boolean>(false);
   const [mostrarHistorialArticulos, setMostrarHistorialArticulos] = useState<boolean>(false);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  const currentYearMonth = useMemo(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  }, []);
+
+  const defaultActivePeriod = useMemo(() => {
+    if (cliente?.periodo_actual && cliente.periodo_actual > currentYearMonth) {
+      return cliente.periodo_actual;
+    }
+    return currentYearMonth;
+  }, [cliente?.periodo_actual, currentYearMonth]);
+
+  const [selectedPeriodo, setSelectedPeriodo] = useState<string>(defaultActivePeriod);
+  const [saldoFichaSeleccionada, setSaldoFichaSeleccionada] = useState<number>(0);
+
+  useEffect(() => {
+    setSelectedPeriodo(defaultActivePeriod);
+  }, [cliente?.id, defaultActivePeriod]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -99,7 +123,7 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
     if (!cliente) return;
     setExportandoExcel(true);
     try {
-      await api.exportarExcel(cliente.id, undefined, cliente.nombre);
+      await api.exportarExcel(cliente.id, selectedPeriodo, cliente.nombre);
     } catch (err: any) {
       alert(err.message || 'Error al exportar Excel');
     } finally {
@@ -129,14 +153,11 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
   // Cargar articulos dinamicos del cliente
   const cargarArticulos = useCallback(async () => {
     if (!cliente) return;
-    setLoadingArticulos(true);
     try {
       const data = await api.getClienteArticulos(cliente.id, false);
       setArticulos(data);
     } catch (err) {
       console.error('Error al cargar artículos del cliente:', err);
-    } finally {
-      setLoadingArticulos(false);
     }
   }, [cliente?.id]);
 
@@ -160,7 +181,9 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
             Paso 1: Buscar y seleccionar cliente
           </h3>
           <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
-            Por seguridad, primero busque al cliente por su <strong className="text-slate-200">nombre o apodo</strong> antes de registrar un fiado, garrafa o cobro.
+            Por seguridad, primero busque al cliente por su{' '}
+            <strong className="text-slate-200">nombre o apodo</strong> antes de registrar un
+            fiado, garrafa o cobro.
           </p>
 
           {onSearchChange && (
@@ -193,7 +216,7 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
                 </div>
               ) : (
                 clientes.slice(0, 8).map((c) => {
-                  const s = parseFloat(c.saldo_total || c.saldo_actual);
+                  const s = parseFloat(c.saldo_actual);
                   return (
                     <button
                       key={c.id}
@@ -219,7 +242,7 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
                           s > 0 ? 'text-rose-400' : s < 0 ? 'text-cyan-400' : 'text-emerald-400'
                         }`}
                       >
-                        {formatCurrency(c.saldo_total || c.saldo_actual)}
+                        {formatCurrency(c.saldo_actual)}
                       </span>
                     </button>
                   );
@@ -234,90 +257,45 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
 
   const articulosPendientes = articulos.filter((a) => a.estado === 'PENDIENTE');
   const articulosHistorial = articulos.filter((a) => a.estado !== 'PENDIENTE');
-  const totalArticulosPendientes = articulosPendientes.reduce(
+
+  // Artículos pendientes que pertenecen a la ficha actualmente seleccionada
+  const articulosPendientesFicha = articulosPendientes.filter((a) => {
+    const p =
+      a.periodo ||
+      (() => {
+        const d = new Date(a.fecha_creacion);
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      })();
+    return p === selectedPeriodo;
+  });
+
+  const totalArticulosFicha = articulosPendientesFicha.reduce(
     (acc, a) => acc + parseFloat(a.subtotal_actual),
     0
   );
 
-  const saldoLibreta = parseFloat(cliente.saldo_actual);
-  const saldoTotal = saldoLibreta + totalArticulosPendientes;
-  const hasDebt = saldoTotal > 0;
-  const isCredit = saldoTotal < 0;
+  const saldoGeneral = parseFloat(cliente.saldo_actual);
+  const labelFichaSeleccionada = getPeriodoLabel(selectedPeriodo);
+  const esFichaAnterior = selectedPeriodo < defaultActivePeriod;
 
-  const handleLiquidarArticulo = async (art: ClienteArticulo) => {
-    if (!cliente) return;
-    const confirmMsg = `¿Asentar a la libreta ${art.cantidad} ${art.producto_unidad} de "${art.producto_nombre}" al valor actual de ${formatCurrency(art.subtotal_actual)}?`;
+  const hasDebt = saldoFichaSeleccionada > 0.005;
+  const isCredit = saldoFichaSeleccionada < -0.005;
+
+  const handleCancelarArticuloById = async (articuloId: number) => {
+    const art = articulos.find((x) => x.id === articuloId);
+    const confirmMsg = `¿Quitar "${
+      art?.producto_nombre || 'este producto'
+    }" anotado? No se sumará al cierre de mes.`;
     if (!window.confirm(confirmMsg)) return;
 
-    setLiquidando(true);
     try {
-      await api.liquidarClienteArticulos(cliente.id, { articulo_ids: [art.id] });
-      hapticSuccess();
-      await cargarArticulos();
-      if (onRefreshClient) await onRefreshClient();
-      if (onOperationFinished) {
-        onOperationFinished({
-          titulo: '¡Producto sumado a la libreta!',
-          detalle: `Liquidación: ${art.cantidad} ${art.producto_unidad} de ${art.producto_nombre}`,
-          monto: art.subtotal_actual,
-          esCargo: true,
-        });
-      }
-    } catch (err: any) {
-      hapticError();
-      alert(err.message || 'Error al liquidar producto');
-    } finally {
-      setLiquidando(false);
-    }
-  };
-
-  const handleLiquidarTodos = async () => {
-    if (!cliente || articulosPendientes.length === 0) return;
-    const count = articulosPendientes.length;
-    const montoTotal = totalArticulosPendientes.toFixed(2);
-    const confirmMsg = `¿Cerrar cuenta y asentar todos los productos (${count}) a la libreta por un total de ${formatCurrency(totalArticulosPendientes)} a cotización actual?`;
-    if (!window.confirm(confirmMsg)) return;
-
-    setLiquidando(true);
-    try {
-      await api.liquidarClienteArticulos(cliente.id, {
-        articulo_ids: articulosPendientes.map((a) => a.id),
-      });
-      hapticSuccess();
-      await cargarArticulos();
-      if (onRefreshClient) await onRefreshClient();
-      if (onOperationFinished) {
-        onOperationFinished({
-          titulo: '¡Productos sumados a la libreta!',
-          detalle: `Liquidación de ${count} producto(s) a cotización del día`,
-          monto: montoTotal,
-          esCargo: true,
-        });
-      }
-    } catch (err: any) {
-      hapticError();
-      alert(err.message || 'Error al liquidar productos');
-    } finally {
-      setLiquidando(false);
-    }
-  };
-
-  const handleCancelarArticulo = async (art: ClienteArticulo) => {
-    if (!cliente) return;
-    const confirmMsg = `¿Cancelar o registrar devolución de "${art.producto_nombre}"? No se sumará ningún cargo a la libreta.`;
-    if (!window.confirm(confirmMsg)) return;
-
-    setLiquidando(true);
-    try {
-      await api.cancelarClienteArticulo(art.id);
+      await api.cancelarClienteArticulo(articuloId);
       hapticSuccess();
       await cargarArticulos();
       if (onRefreshClient) await onRefreshClient();
     } catch (err: any) {
       hapticError();
       alert(err.message || 'Error al cancelar producto');
-    } finally {
-      setLiquidando(false);
     }
   };
 
@@ -388,14 +366,14 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            {/* Quick WhatsApp Summary Button */}
+            {/* Quick WhatsApp Summary Button (for selected month tab) */}
             <button
-              onClick={() => onOpenWhatsAppModal()}
-              title="Enviar resumen mensual por WhatsApp"
+              onClick={() => onOpenWhatsAppModal(selectedPeriodo)}
+              title={`Enviar resumen de ${labelFichaSeleccionada} por WhatsApp`}
               className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600/15 hover:bg-emerald-600/25 border border-emerald-500/30 text-emerald-400 text-xs font-semibold transition active:scale-95"
             >
               <MessageCircle className="w-4 h-4" />
-              <span className="hidden sm:inline">WhatsApp</span>
+              <span className="hidden sm:inline">WhatsApp ({labelFichaSeleccionada.split(' ')[0]})</span>
             </button>
 
             {/* Three Dots Menu Button (⋮) */}
@@ -417,7 +395,6 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
 
               {menuOpen && (
                 <div className="absolute right-0 mt-2 w-56 rounded-2xl bg-slate-800 border border-slate-700 shadow-2xl py-1.5 z-30 animate-in fade-in zoom-in-95">
-                  {/* Opción 1: Editar datos */}
                   <button
                     onClick={() => {
                       hapticTap(15);
@@ -430,7 +407,6 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
                     <span>Editar datos del cliente</span>
                   </button>
 
-                  {/* Opción 2: Habilitar / Deshabilitar */}
                   {onToggleActivo && (
                     <button
                       onClick={() => {
@@ -457,7 +433,6 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
 
                   <div className="my-1 border-t border-slate-700/60" />
 
-                  {/* Opción 3: Exportar Excel */}
                   <button
                     onClick={() => {
                       hapticTap(15);
@@ -468,7 +443,7 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
                     className="w-full px-4 py-2.5 text-left text-xs font-medium text-slate-200 hover:bg-slate-700/80 hover:text-white flex items-center gap-2.5 transition disabled:opacity-50"
                   >
                     <FileSpreadsheet className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span>Descargar Excel (.xlsx)</span>
+                    <span>Descargar Excel ({labelFichaSeleccionada})</span>
                   </button>
                 </div>
               )}
@@ -476,7 +451,7 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
           </div>
         </div>
 
-        {/* Saldo Hero Card */}
+        {/* Saldo Hero Card — Separado por la Ficha del Mes Seleccionada */}
         <div
           className={`p-4 rounded-2xl border transition shadow-lg ${
             hasDebt
@@ -486,15 +461,15 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
               : 'bg-gradient-to-br from-emerald-950/40 via-emerald-900/20 to-slate-900 border-emerald-500/30'
           }`}
         >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-              {articulosPendientes.length > 0
-                ? 'Total a Pagar Hoy (Libreta + Garrafas)'
-                : hasDebt
-                ? 'Saldo Deudor Actual'
-                : isCredit
-                ? 'Saldo a Favor'
-                : 'Estado de Cuenta'}
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+              <Calendar className="w-3.5 h-3.5 text-emerald-400" />
+              Total Ficha {labelFichaSeleccionada}
+              {esFichaAnterior && (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold">
+                  MES ANTERIOR SELECCIONADO
+                </span>
+              )}
             </span>
             <span
               className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${
@@ -505,7 +480,7 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
                   : 'bg-emerald-500/20 text-emerald-300'
               }`}
             >
-              {hasDebt ? 'DEBE' : isCredit ? 'A FAVOR' : 'AL DÍA'}
+              {hasDebt ? 'PENDIENTE EN ESTE MES' : isCredit ? 'A FAVOR EN ESTE MES' : 'FICHA EN $0,00'}
             </span>
           </div>
 
@@ -515,10 +490,10 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
                 hasDebt ? 'text-rose-400' : isCredit ? 'text-cyan-400' : 'text-emerald-400'
               }`}
             >
-              {formatCurrency(articulosPendientes.length > 0 ? saldoTotal : cliente.saldo_actual)}
+              {formatCurrency(saldoFichaSeleccionada)}
             </div>
 
-            {cliente.activo && (
+            {cliente.activo && (!esFichaAnterior || articulosPendientesFicha.length > 0) && (
               <button
                 type="button"
                 onClick={() => {
@@ -528,19 +503,35 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
                 className="px-3 py-2 rounded-xl bg-slate-800/90 hover:bg-emerald-600 border border-slate-600/80 hover:border-emerald-500 text-slate-100 hover:text-white text-xs font-bold transition active:scale-95 flex items-center gap-1.5 shadow-md"
               >
                 <Calculator className="w-4 h-4 text-emerald-400 group-hover:text-white shrink-0" />
-                <span>Liquidar / Cerrar Mes</span>
+                <span>
+                  {esFichaAnterior
+                    ? `Sumar Productos al Cierre de ${labelFichaSeleccionada.split(' ')[0]}`
+                    : `Liquidar / Cerrar ${labelFichaSeleccionada.split(' ')[0]}`}
+                </span>
               </button>
             )}
           </div>
 
-          {articulosPendientes.length > 0 && (
-            <div className="mt-2.5 pt-2.5 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-300 flex-wrap gap-1">
-              <span className="text-slate-400">
-                Libreta: <strong className="text-white">{formatCurrency(cliente.saldo_actual)}</strong>
-              </span>
-              <span className="text-amber-400 font-medium">
-                + {formatCurrency(totalArticulosPendientes)} en {articulosPendientes.length} producto(s) a cotización de hoy
-              </span>
+          {/* Info adicional: Productos a sumar al cierre y/o Deuda acumulada de otras fichas */}
+          {(articulosPendientesFicha.length > 0 ||
+            Math.abs(saldoGeneral - saldoFichaSeleccionada) > 0.01) && (
+            <div className="mt-2.5 pt-2.5 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-300 flex-wrap gap-2">
+              {articulosPendientesFicha.length > 0 ? (
+                <span className="text-amber-400 font-medium">
+                  📦 {articulosPendientesFicha.length} producto(s) anotados en{' '}
+                  {labelFichaSeleccionada.split(' ')[0]} (se sumarán al cierre del mes: +
+                  {formatCurrency(totalArticulosFicha)})
+                </span>
+              ) : (
+                <span />
+              )}
+
+              {Math.abs(saldoGeneral - saldoFichaSeleccionada) > 0.01 && (
+                <span className="text-slate-400">
+                  Deuda total acumulada (todas las fichas):{' '}
+                  <strong className="text-white">{formatCurrency(saldoGeneral)}</strong>
+                </span>
+              )}
             </div>
           )}
         </div>
@@ -550,17 +541,24 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
           <div className="mt-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center gap-2.5">
             <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
             <span>
-              <strong>Cliente inhabilitado:</strong> No se pueden asentar nuevos fiados ni pagos hasta que la cuenta sea reactivada.
+              <strong>Cliente inhabilitado:</strong> No se pueden asentar nuevos fiados ni pagos
+              hasta que la cuenta sea reactivada.
             </span>
           </div>
         )}
 
-        {/* Action Buttons: The 3-Touch counter buttons */}
+        {/* Action Buttons: Operan directamente sobre la Ficha del Mes Seleccionada */}
         <div className="grid grid-cols-3 gap-2 mt-3.5">
           <button
-            onClick={() => onOpenMovementModal('CARGO')}
+            onClick={() =>
+              onOpenMovementModal('CARGO', selectedPeriodo, saldoFichaSeleccionada)
+            }
             disabled={!cliente.activo}
-            title={!cliente.activo ? "Cliente inhabilitado" : "Registrar nuevo fiado"}
+            title={
+              !cliente.activo
+                ? 'Cliente inhabilitado'
+                : `Registrar fiado en la ficha ${labelFichaSeleccionada}`
+            }
             className={`py-3 px-2 rounded-xl font-bold text-xs sm:text-sm shadow-md transition flex items-center justify-center gap-1.5 ${
               cliente.activo
                 ? 'bg-rose-600 hover:bg-rose-500 active:scale-95 text-white shadow-rose-950/40'
@@ -568,7 +566,9 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
             }`}
           >
             <PlusCircle className="w-4 h-4 shrink-0" />
-            <span className="truncate">+ Fiado</span>
+            <span className="truncate">
+              + Fiado ({labelFichaSeleccionada.split(' ')[0]})
+            </span>
           </button>
 
           <button
@@ -577,7 +577,11 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
               setAddArticleModalOpen(true);
             }}
             disabled={!cliente.activo}
-            title={!cliente.activo ? "Cliente inhabilitado" : "Anotar Garrafa o producto con cotización dinámica"}
+            title={
+              !cliente.activo
+                ? 'Cliente inhabilitado'
+                : `Anotar Garrafa/Producto en ${labelFichaSeleccionada} para sumar al cierre de mes`
+            }
             className={`py-3 px-2 rounded-xl font-bold text-xs sm:text-sm shadow-md transition flex items-center justify-center gap-1.5 ${
               cliente.activo
                 ? 'bg-amber-600 hover:bg-amber-500 active:scale-95 text-white shadow-amber-950/40'
@@ -589,9 +593,15 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
           </button>
 
           <button
-            onClick={() => onOpenMovementModal('PAGO')}
+            onClick={() =>
+              onOpenMovementModal('PAGO', selectedPeriodo, saldoFichaSeleccionada)
+            }
             disabled={!cliente.activo}
-            title={!cliente.activo ? "Cliente inhabilitado" : "Registrar cobro"}
+            title={
+              !cliente.activo
+                ? 'Cliente inhabilitado'
+                : `Registrar cobro en la ficha ${labelFichaSeleccionada}`
+            }
             className={`py-3 px-2 rounded-xl font-bold text-xs sm:text-sm shadow-md transition flex items-center justify-center gap-1.5 ${
               cliente.activo
                 ? 'bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white shadow-emerald-950/40'
@@ -599,111 +609,12 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
             }`}
           >
             <CheckCircle2 className="w-4 h-4 shrink-0" />
-            <span className="truncate">Cobrar</span>
+            <span className="truncate">
+              Cobrar ({labelFichaSeleccionada.split(' ')[0]})
+            </span>
           </button>
         </div>
       </div>
-
-      {/* Dynamic Products Pending Section */}
-      {articulosPendientes.length > 0 && (
-        <div className="p-3 sm:p-5 pb-0">
-          <div className="bg-slate-850/90 rounded-2xl border border-amber-500/30 p-3.5 sm:p-4 shadow-lg">
-            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
-                  <Package className="w-4 h-4" />
-                </div>
-                <div>
-                  <h4 className="text-xs sm:text-sm font-bold text-white flex items-center gap-1.5">
-                    Productos a Cotización del Día
-                    <span className="text-[10px] font-semibold px-2 py-0.2 rounded-full bg-amber-500/20 text-amber-300">
-                      {articulosPendientes.length}
-                    </span>
-                    {loadingArticulos && (
-                      <div className="w-3 h-3 border border-amber-400 border-t-transparent rounded-full animate-spin ml-1" />
-                    )}
-                  </h4>
-                  <p className="text-[11px] text-slate-400">
-                    Se liquidan a la libreta sumando el valor vigente hoy
-                  </p>
-                </div>
-              </div>
-
-              {articulosPendientes.length > 1 && (
-                <button
-                  onClick={handleLiquidarTodos}
-                  disabled={liquidando}
-                  className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 active:scale-95 text-white font-bold text-xs transition shadow-sm flex items-center gap-1.5"
-                >
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Cerrar y Sumar Todos ({formatCurrency(totalArticulosPendientes)})</span>
-                </button>
-              )}
-            </div>
-
-            {/* Items list */}
-            <div className="space-y-2">
-              {articulosPendientes.map((art) => (
-                <div
-                  key={art.id}
-                  className="bg-slate-900/90 rounded-xl p-3 border border-slate-700/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-                >
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-semibold text-white text-sm">
-                        {art.producto_nombre}
-                      </span>
-                      <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
-                        {art.cantidad} {art.producto_unidad}
-                      </span>
-                      {art.nota && (
-                        <span className="text-xs text-slate-400 italic">
-                          "{art.nota}"
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-2 flex-wrap">
-                      <span>Cotización actual: <strong className="text-amber-300">{formatCurrency(art.precio_unitario_actual)}</strong>/{art.producto_unidad}</span>
-                      <span>•</span>
-                      <span>Anotado {new Date(art.fecha_creacion).toLocaleDateString('es-AR')}</span>
-                      {art.usuario_nombre && <span>por {art.usuario_nombre}</span>}
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-800">
-                    <div className="text-right">
-                      <span className="text-[10px] text-slate-400 block">Subtotal actual</span>
-                      <span className="text-sm sm:text-base font-extrabold text-amber-400">
-                        {formatCurrency(art.subtotal_actual)}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => handleLiquidarArticulo(art)}
-                        disabled={liquidando}
-                        title="Pasar a la libreta como cargo al precio actual de hoy"
-                        className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white text-xs font-semibold flex items-center gap-1 transition"
-                      >
-                        <Check className="w-3.5 h-3.5" />
-                        <span>Sumar a Libreta</span>
-                      </button>
-                      <button
-                        onClick={() => handleCancelarArticulo(art)}
-                        disabled={liquidando}
-                        title="Cancelar o registrar devolución de este producto"
-                        className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-900/40 text-slate-400 hover:text-rose-400 border border-slate-700 hover:border-rose-500/30 transition"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* History of Closed/Returned Products */}
       {articulosHistorial.length > 0 && (
@@ -712,8 +623,15 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
             onClick={() => setMostrarHistorialArticulos(!mostrarHistorialArticulos)}
             className="text-xs text-slate-400 hover:text-slate-300 flex items-center gap-1 transition font-medium"
           >
-            {mostrarHistorialArticulos ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-            <span>{mostrarHistorialArticulos ? 'Ocultar' : 'Ver'} historial de productos cerrados/devueltos ({articulosHistorial.length})</span>
+            {mostrarHistorialArticulos ? (
+              <ChevronUp className="w-3.5 h-3.5" />
+            ) : (
+              <ChevronDown className="w-3.5 h-3.5" />
+            )}
+            <span>
+              {mostrarHistorialArticulos ? 'Ocultar' : 'Ver'} historial de productos sumados en
+              cierres anteriores ({articulosHistorial.length})
+            </span>
           </button>
 
           {mostrarHistorialArticulos && (
@@ -725,7 +643,9 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
                 >
                   <div className="flex items-center gap-2">
                     <span className="font-medium text-slate-300">{art.producto_nombre}</span>
-                    <span>({art.cantidad} {art.producto_unidad})</span>
+                    <span>
+                      ({art.cantidad} {art.producto_unidad})
+                    </span>
                     <span
                       className={`px-1.5 py-0.2 rounded text-[10px] font-semibold ${
                         art.estado === 'LIQUIDADO'
@@ -733,12 +653,16 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
                           : 'bg-slate-700 text-slate-400'
                       }`}
                     >
-                      {art.estado === 'LIQUIDADO' ? 'Liquidado a libreta' : 'Devuelto / Cancelado'}
+                      {art.estado === 'LIQUIDADO'
+                        ? 'Sumado al cierre de mes'
+                        : 'Devuelto / Cancelado'}
                     </span>
                   </div>
                   <div className="text-right">
                     {art.precio_liquidado ? (
-                      <span className="text-slate-300 font-semibold">{formatCurrency(art.precio_liquidado)}</span>
+                      <span className="text-slate-300 font-semibold">
+                        {formatCurrency(art.precio_liquidado)}
+                      </span>
                     ) : (
                       <span>-</span>
                     )}
@@ -750,22 +674,46 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
         </div>
       )}
 
-      {/* Movements History Section */}
+      {/* Movements & Monthly Tabs Section */}
       <div className="p-3 sm:p-5 flex-1">
         <div className="flex items-center justify-between mb-3 px-1">
           <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
             <Calendar className="w-4 h-4 text-slate-500" />
-            Períodos Mensuales y Movimientos ({movimientos.length})
+            Fichas Mensuales Independientes
           </h3>
-          <span className="text-[11px] text-slate-500">Seleccione una pestaña de mes</span>
+          <span className="text-[11px] text-slate-500">
+            Cada ficha separa su propio total mensual
+          </span>
         </div>
 
         <MovementList
           movimientos={movimientos}
+          articulosPendientes={articulosPendientes}
           loading={loadingMovimientos}
           periodoActivo={cliente.periodo_actual}
+          selectedPeriodo={selectedPeriodo}
+          onSelectPeriodo={(periodo, saldoFicha) => {
+            setSelectedPeriodo(periodo);
+            setSaldoFichaSeleccionada(saldoFicha);
+          }}
           onAnular={onAnularMovimiento}
+          onEditar={onEditarMovimiento}
           onOpenWhatsAppMes={(periodo) => onOpenWhatsAppModal(periodo)}
+          onOpenMovementForPeriodo={(tipo, periodo, saldoFicha) => {
+            setSelectedPeriodo(periodo);
+            setSaldoFichaSeleccionada(saldoFicha);
+            onOpenMovementModal(tipo, periodo, saldoFicha);
+          }}
+          onOpenAddArticleForPeriodo={(periodo) => {
+            setSelectedPeriodo(periodo);
+            setAddArticleModalOpen(true);
+          }}
+          onOpenCloseMonthForPeriodo={(periodo, saldoFicha) => {
+            setSelectedPeriodo(periodo);
+            setSaldoFichaSeleccionada(saldoFicha);
+            setCloseAccountModalOpen(true);
+          }}
+          onCancelarArticulo={handleCancelarArticuloById}
         />
       </div>
 
@@ -781,20 +729,19 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
         }}
       />
 
-      {/* Modal para anotar Garrafas u otros productos con cotización dinámica */}
+      {/* Modal para anotar Garrafas u otros productos que se suman al cierre de mes */}
       <AddArticleModal
         isOpen={addArticleModalOpen}
         cliente={cliente}
+        targetPeriodo={selectedPeriodo}
         onClose={() => setAddArticleModalOpen(false)}
         onSuccess={async (art) => {
           await cargarArticulos();
           if (onRefreshClient) await onRefreshClient();
           if (onOperationFinished) {
             onOperationFinished({
-              titulo: '¡Producto anotado con éxito!',
-              detalle: `${art.cantidad} ${art.producto_unidad} de ${art.producto_nombre}${
-                art.nota ? ` (${art.nota})` : ''
-              }`,
+              titulo: '¡Producto anotado para cierre de mes!',
+              detalle: `${art.cantidad} ${art.producto_unidad} de ${art.producto_nombre} en ficha ${labelFichaSeleccionada} (se suma al cerrar el mes)`,
               monto: art.subtotal_actual,
               esCargo: true,
             });
@@ -802,15 +749,20 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
         }}
       />
 
-      {/* Modal para Cerrar Cuenta / Liquidar Mes */}
+      {/* Modal para Liquidar / Cerrar Mes */}
       <CloseAccountModal
         isOpen={closeAccountModalOpen}
         cliente={cliente}
-        articulosPendientes={articulosPendientes}
+        targetPeriodo={selectedPeriodo}
+        saldoFichaLibreta={saldoFichaSeleccionada}
+        articulosPendientes={articulosPendientesFicha}
         onClose={() => setCloseAccountModalOpen(false)}
-        onSuccess={async (info) => {
+        onSuccess={async (info, nuevoPeriodoActivo) => {
           await cargarArticulos();
           if (onRefreshClient) await onRefreshClient();
+          if (nuevoPeriodoActivo) {
+            setSelectedPeriodo(nuevoPeriodoActivo);
+          }
           if (onOperationFinished) {
             onOperationFinished(info);
           }

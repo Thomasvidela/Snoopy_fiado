@@ -78,6 +78,7 @@ export interface ClienteArticulo {
   cantidad: string;
   subtotal_actual: string;
   nota?: string | null;
+  periodo?: string | null;
   estado: 'PENDIENTE' | 'LIQUIDADO' | 'DEVUELTO';
   fecha_creacion: string;
   usuario_nombre?: string | null;
@@ -90,6 +91,7 @@ export interface ClienteArticuloCreatePayload {
   producto_id: number;
   cantidad: string | number;
   nota?: string;
+  periodo?: string;
 }
 
 export interface ResumenMensual {
@@ -124,6 +126,11 @@ export interface MovimientoCreatePayload {
   monto: string;
   nota?: string;
   periodo?: string;
+}
+
+export interface MovimientoUpdatePayload {
+  monto?: string;
+  nota?: string;
 }
 
 export interface CerrarMesResponse {

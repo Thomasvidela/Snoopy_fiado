@@ -11,7 +11,7 @@ import { ManageOperatorsModal } from '../components/ManageOperatorsModal';
 import { ManageProductsModal } from '../components/ManageProductsModal';
 import { StoreGateModal } from '../components/StoreGateModal';
 import { PostOperationModal, PostOperationInfo } from '../components/PostOperationModal';
-import { Cliente, Movimiento, MovimientoCreatePayload, Operador } from '../types';
+import { Cliente, Movimiento, MovimientoCreatePayload, MovimientoUpdatePayload, Operador } from '../types';
 import { api, authStorage, storeAuth } from '../api/client';
 
 export const App: React.FC = () => {
@@ -34,6 +34,8 @@ export const App: React.FC = () => {
   // Modals state
   const [movementModalOpen, setMovementModalOpen] = useState<boolean>(false);
   const [movementDefaultTipo, setMovementDefaultTipo] = useState<'CARGO' | 'PAGO'>('CARGO');
+  const [movementTargetPeriodo, setMovementTargetPeriodo] = useState<string | undefined>(undefined);
+  const [movementSaldoFicha, setMovementSaldoFicha] = useState<number | undefined>(undefined);
   const [whatsAppModalOpen, setWhatsAppModalOpen] = useState<boolean>(false);
   const [whatsAppInitialPeriod, setWhatsAppInitialPeriod] = useState<string | undefined>(undefined);
   const [newClientModalOpen, setNewClientModalOpen] = useState<boolean>(false);
@@ -188,6 +190,25 @@ export const App: React.FC = () => {
     ]);
   };
 
+  // Edit movement handler
+  const handleEditarMovimiento = async (
+    movimientoId: number,
+    payload: MovimientoUpdatePayload
+  ) => {
+    if (!selectedCliente) return;
+    await api.updateMovimiento(movimientoId, payload);
+    await Promise.all([
+      fetchClientes(searchQuery),
+      fetchMovimientos(selectedCliente.id),
+    ]);
+    try {
+      const fresh = await api.getCliente(selectedCliente.id);
+      setSelectedCliente(fresh);
+    } catch {
+      // ignore
+    }
+  };
+
   // Toggle active status for client
   const handleToggleClienteActivo = async (clienteId: number) => {
     const updated = await api.toggleClienteActivo(clienteId);
@@ -272,8 +293,10 @@ export const App: React.FC = () => {
               loadingMovimientos={loadingMovimientos}
               onBack={handleCloseCliente}
               onCloseCliente={handleCloseCliente}
-              onOpenMovementModal={(tipo) => {
+              onOpenMovementModal={(tipo, periodo, saldoFicha) => {
                 setMovementDefaultTipo(tipo);
+                setMovementTargetPeriodo(periodo);
+                setMovementSaldoFicha(saldoFicha);
                 setMovementModalOpen(true);
               }}
               onOpenWhatsAppModal={(periodo?: string) => {
@@ -281,6 +304,7 @@ export const App: React.FC = () => {
                 setWhatsAppModalOpen(true);
               }}
               onAnularMovimiento={handleAnularMovimiento}
+              onEditarMovimiento={handleEditarMovimiento}
               onToggleActivo={handleToggleClienteActivo}
               onUpdateCliente={handleUpdateCliente}
               onRefreshClient={handleRefreshSelectedCliente}
@@ -329,6 +353,8 @@ export const App: React.FC = () => {
         isOpen={movementModalOpen}
         cliente={selectedCliente}
         defaultTipo={movementDefaultTipo}
+        targetPeriodo={movementTargetPeriodo}
+        saldoFichaPeriodo={movementSaldoFicha}
         onClose={() => setMovementModalOpen(false)}
         onSubmit={handleCreateMovimiento}
       />

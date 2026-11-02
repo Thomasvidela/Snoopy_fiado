@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Package, X, AlertCircle, Plus, Minus, Tag } from 'lucide-react';
+import { Package, X, AlertCircle, Plus, Minus, Tag, Calendar } from 'lucide-react';
 import { Cliente, Producto, ClienteArticulo } from '../types';
 import { api } from '../api/client';
 import { formatCurrency } from '../utils/format';
@@ -8,13 +8,39 @@ import { hapticTap, hapticSuccess, hapticError } from '../utils/haptics';
 interface AddArticleModalProps {
   isOpen: boolean;
   cliente: Cliente | null;
+  targetPeriodo?: string;
   onClose: () => void;
   onSuccess: (articulo: ClienteArticulo) => void;
+}
+
+const MESES_NOMBRES: Record<number, string> = {
+  1: 'Enero',
+  2: 'Febrero',
+  3: 'Marzo',
+  4: 'Abril',
+  5: 'Mayo',
+  6: 'Junio',
+  7: 'Julio',
+  8: 'Agosto',
+  9: 'Septiembre',
+  10: 'Octubre',
+  11: 'Noviembre',
+  12: 'Diciembre',
+};
+
+function formatearPeriodo(periodo?: string): string {
+  if (!periodo) return 'Mes en curso';
+  const parts = periodo.split('-');
+  if (parts.length !== 2) return periodo;
+  const anio = parseInt(parts[0], 10);
+  const mes = parseInt(parts[1], 10);
+  return `${MESES_NOMBRES[mes] || mes} ${anio}`;
 }
 
 export const AddArticleModal: React.FC<AddArticleModalProps> = ({
   isOpen,
   cliente,
+  targetPeriodo,
   onClose,
   onSuccess,
 }) => {
@@ -53,6 +79,7 @@ export const AddArticleModal: React.FC<AddArticleModalProps> = ({
   if (!isOpen || !cliente) return null;
 
   const selectedProd = productos.find((p) => p.id === selectedProductoId);
+  const periodoLabel = formatearPeriodo(targetPeriodo || cliente.periodo_actual || undefined);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -72,6 +99,7 @@ export const AddArticleModal: React.FC<AddArticleModalProps> = ({
         producto_id: selectedProductoId,
         cantidad: cantidad.toString(),
         nota: nota.trim() || undefined,
+        periodo: targetPeriodo || undefined,
       });
       hapticSuccess();
       onClose();
@@ -94,12 +122,18 @@ export const AddArticleModal: React.FC<AddArticleModalProps> = ({
           <X className="w-5 h-5" />
         </button>
 
-        <div className="flex items-center gap-3 mb-4">
+        <div className="flex items-center gap-3 mb-4 pr-6">
           <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center shrink-0">
             <Package className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-base font-bold text-white">Anotar Producto Fijo</h2>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-base font-bold text-white">Anotar Producto para Cierre de Mes</h2>
+              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                <Calendar className="w-3 h-3" />
+                {periodoLabel}
+              </span>
+            </div>
             <p className="text-xs text-slate-400">
               Libreta de: <strong className="text-white">{cliente.nombre}</strong>
             </p>
@@ -206,16 +240,17 @@ export const AddArticleModal: React.FC<AddArticleModalProps> = ({
             </div>
           </div>
 
-          {/* Explicación de cotización dinámica */}
+          {/* Explicación de suma al cierre de mes */}
           <div className="p-3 rounded-xl bg-slate-850/80 border border-slate-700/60 text-slate-300 text-xs">
             <div className="flex items-center justify-between text-slate-400 mb-1">
-              <span>Cotización de referencia actual:</span>
+              <span>Valor de referencia hoy:</span>
               <strong className="text-emerald-400 font-mono">
                 {selectedProd ? formatCurrency(parseFloat(selectedProd.precio_actual) * cantidad) : '$0,00'}
               </strong>
             </div>
             <p className="text-[11px] text-slate-400 leading-relaxed">
-              💡 <strong>Regla contable:</strong> Este producto no congela pesos hoy. Se asentará al valor vigente de la garrafa en el momento exacto en que se liquide o cobre la cuenta.
+              💡 <strong>Se suma al cierre de mes:</strong> Este producto queda anotado en la ficha de{' '}
+              <strong className="text-white">{periodoLabel}</strong> y su valor vigente se sumará automáticamente al total cuando realices el <strong>Cierre / Liquidación del Mes</strong>.
             </p>
           </div>
 
@@ -233,7 +268,7 @@ export const AddArticleModal: React.FC<AddArticleModalProps> = ({
               disabled={guardando || !selectedProductoId}
               className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold shadow-md shadow-amber-950/40 transition disabled:opacity-50 flex items-center gap-1.5"
             >
-              {guardando ? 'Anotando...' : 'Anotar en Libreta'}
+              {guardando ? 'Anotando...' : `Anotar en ${periodoLabel}`}
             </button>
           </div>
         </form>

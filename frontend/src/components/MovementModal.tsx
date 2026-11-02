@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { PlusCircle, CheckCircle2, X, AlertCircle } from 'lucide-react';
+import { PlusCircle, CheckCircle2, X, AlertCircle, Calendar } from 'lucide-react';
 import { Cliente, MovimientoCreatePayload } from '../types';
 import { formatCurrency } from '../utils/format';
 import { hapticTap, hapticSuccess, hapticError } from '../utils/haptics';
@@ -8,18 +8,46 @@ interface MovementModalProps {
   isOpen: boolean;
   cliente: Cliente | null;
   defaultTipo?: 'CARGO' | 'PAGO';
+  targetPeriodo?: string;
+  saldoFichaPeriodo?: number;
   onClose: () => void;
   onSubmit: (payload: MovimientoCreatePayload) => Promise<void>;
 }
 
+const MESES_NOMBRES: Record<number, string> = {
+  1: 'Enero',
+  2: 'Febrero',
+  3: 'Marzo',
+  4: 'Abril',
+  5: 'Mayo',
+  6: 'Junio',
+  7: 'Julio',
+  8: 'Agosto',
+  9: 'Septiembre',
+  10: 'Octubre',
+  11: 'Noviembre',
+  12: 'Diciembre',
+};
+
+function formatearPeriodo(periodo?: string): string {
+  if (!periodo) return 'Mes en curso';
+  const parts = periodo.split('-');
+  if (parts.length !== 2) return periodo;
+  const anio = parseInt(parts[0], 10);
+  const mes = parseInt(parts[1], 10);
+  return `${MESES_NOMBRES[mes] || mes} ${anio}`;
+}
+
 const PRESET_AMOUNTS = [500, 1000, 2000, 5000, 10000, 20000];
 const PRESET_NOTES_CARGO = ['Pan y leche', 'Gaseosas / Bebidas', 'Fiambres', 'Almacén', 'Limpieza', 'Varios'];
-const PRESET_NOTES_PAGO = ['Efectivo', 'Transferencia', 'Pago total', 'Entrega a cuenta'];
+const PRESET_NOTES_PAGO = ['Efectivo', 'Transferencia', 'Pago total del mes', 'Entrega a cuenta'];
 
 export const MovementModal: React.FC<MovementModalProps> = ({
   isOpen,
   cliente,
   defaultTipo = 'CARGO',
+  targetPeriodo,
+  saldoFichaPeriodo,
   onClose,
   onSubmit,
 }) => {
@@ -37,17 +65,30 @@ export const MovementModal: React.FC<MovementModalProps> = ({
       setMonto('');
       setNota('');
       setError(null);
-      // Auto focus on open for fast counter entry
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [isOpen, defaultTipo]);
 
   if (!isOpen || !cliente) return null;
 
+  const periodoLabel = formatearPeriodo(targetPeriodo || cliente.periodo_actual || undefined);
+  const saldoDeEstaFicha =
+    saldoFichaPeriodo !== undefined ? saldoFichaPeriodo : parseFloat(cliente.saldo_actual);
+
   const handleAddPreset = (val: number) => {
     hapticTap(20);
     const current = parseFloat(monto || '0');
     setMonto((current + val).toString());
+    setError(null);
+  };
+
+  const handleSaldarFicha = () => {
+    if (saldoDeEstaFicha <= 0) return;
+    hapticTap(20);
+    setMonto(saldoDeEstaFicha.toFixed(2));
+    if (!nota) {
+      setNota(`Pago ficha ${periodoLabel}`);
+    }
     setError(null);
   };
 
@@ -67,6 +108,7 @@ export const MovementModal: React.FC<MovementModalProps> = ({
         tipo,
         monto: parsedMonto.toFixed(2),
         nota: nota.trim() || undefined,
+        periodo: targetPeriodo || undefined,
       });
       hapticSuccess();
       onClose();
@@ -79,15 +121,14 @@ export const MovementModal: React.FC<MovementModalProps> = ({
   };
 
   const isCargo = tipo === 'CARGO';
-  const saldoActual = parseFloat(cliente.saldo_actual);
   const parsedMonto = parseFloat(monto || '0');
-  const nuevoSaldoEstimado = isCargo
-    ? saldoActual + (isNaN(parsedMonto) ? 0 : parsedMonto)
-    : saldoActual - (isNaN(parsedMonto) ? 0 : parsedMonto);
+  const nuevoSaldoFichaEstimado = isCargo
+    ? saldoDeEstaFicha + (isNaN(parsedMonto) ? 0 : parsedMonto)
+    : saldoDeEstaFicha - (isNaN(parsedMonto) ? 0 : parsedMonto);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-150">
-      <div className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-md p-5 shadow-2xl relative">
+      <div className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-md p-5 shadow-2xl relative max-h-[92vh] overflow-y-auto">
         <button
           onClick={onClose}
           className="absolute top-4 right-4 text-slate-400 hover:text-white p-1"
@@ -95,11 +136,17 @@ export const MovementModal: React.FC<MovementModalProps> = ({
           <X className="w-5 h-5" />
         </button>
 
-        {/* Header with Client Info */}
+        {/* Header with Client & Selected Month Ficha Info */}
         <div className="mb-4 p-3 rounded-xl bg-slate-900/90 border border-emerald-500/30 pr-8">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 block">
-            Operando en la cuenta de:
-          </span>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">
+              Operando en la cuenta de:
+            </span>
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+              <Calendar className="w-3 h-3" />
+              Ficha: {periodoLabel}
+            </span>
+          </div>
           <div className="flex items-center gap-2 flex-wrap mt-0.5">
             <h2 className="text-lg font-extrabold text-white">
               {cliente.nombre}
@@ -111,7 +158,8 @@ export const MovementModal: React.FC<MovementModalProps> = ({
             )}
           </div>
           <p className="text-xs text-slate-400 mt-1">
-            Saldo en libreta: <span className="font-semibold text-white">{formatCurrency(cliente.saldo_actual)}</span>
+            Total en ficha <strong className="text-slate-200">{periodoLabel}</strong>:{' '}
+            <span className="font-bold text-white">{formatCurrency(saldoDeEstaFicha)}</span>
           </p>
         </div>
 
@@ -127,7 +175,7 @@ export const MovementModal: React.FC<MovementModalProps> = ({
             }`}
           >
             <PlusCircle className="w-4 h-4" />
-            + FIADO (Cargo)
+            + FIADO ({periodoLabel.split(' ')[0]})
           </button>
           <button
             type="button"
@@ -139,15 +187,29 @@ export const MovementModal: React.FC<MovementModalProps> = ({
             }`}
           >
             <CheckCircle2 className="w-4 h-4" />
-            COBRAR (Pago)
+            COBRAR ({periodoLabel.split(' ')[0]})
           </button>
         </div>
 
         <form onSubmit={handleFormSubmit} className="space-y-4">
+          {/* Quick Pay Full Month Button when in PAGO mode */}
+          {!isCargo && saldoDeEstaFicha > 0 && (
+            <button
+              type="button"
+              onClick={handleSaldarFicha}
+              className="w-full py-2.5 px-3 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 text-xs font-bold flex items-center justify-between transition active:scale-98"
+            >
+              <span>Saldar total de {periodoLabel}:</span>
+              <span className="text-sm font-extrabold text-white">
+                {formatCurrency(saldoDeEstaFicha)}
+              </span>
+            </button>
+          )}
+
           {/* Main Amount Input */}
           <div>
             <label className="text-xs font-medium text-slate-300 block mb-1">
-              Monto en pesos (ARS)
+              Monto en pesos (ARS) — se imputará en <strong>{periodoLabel}</strong>
             </label>
             <div className="relative">
               <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-2xl font-bold text-slate-400">
@@ -222,12 +284,16 @@ export const MovementModal: React.FC<MovementModalProps> = ({
             </div>
           </div>
 
-          {/* Estimated resulting balance preview */}
+          {/* Estimated resulting balance preview for this Ficha */}
           {parsedMonto > 0 && (
             <div className="p-2.5 rounded-xl bg-slate-900/60 border border-slate-700/50 flex items-center justify-between text-xs">
-              <span className="text-slate-400">Nuevo saldo estimado:</span>
-              <span className={`font-bold ${nuevoSaldoEstimado > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
-                {formatCurrency(nuevoSaldoEstimado)}
+              <span className="text-slate-400">Nuevo saldo ficha {periodoLabel}:</span>
+              <span
+                className={`font-bold ${
+                  nuevoSaldoFichaEstimado > 0 ? 'text-rose-400' : 'text-emerald-400'
+                }`}
+              >
+                {formatCurrency(nuevoSaldoFichaEstimado)}
               </span>
             </div>
           )}
@@ -254,12 +320,12 @@ export const MovementModal: React.FC<MovementModalProps> = ({
             ) : isCargo ? (
               <>
                 <PlusCircle className="w-5 h-5" />
-                Asentar Fiado ({formatCurrency(parsedMonto || 0)})
+                Asentar en {periodoLabel} ({formatCurrency(parsedMonto || 0)})
               </>
             ) : (
               <>
                 <CheckCircle2 className="w-5 h-5" />
-                Registrar Cobro ({formatCurrency(parsedMonto || 0)})
+                Cobrar en {periodoLabel} ({formatCurrency(parsedMonto || 0)})
               </>
             )}
           </button>

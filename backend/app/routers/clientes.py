@@ -211,19 +211,30 @@ def cerrar_mes_cliente(
             detail="No se puede cerrar el mes de un cliente inactivo."
         )
 
-    periodo_a_cerrar = obtener_periodo_activo_cliente(cliente)
+    periodo_activo_actual = obtener_periodo_activo_cliente(cliente)
+    periodo_a_cerrar = (
+        payload.periodo.strip()
+        if payload and payload.periodo and payload.periodo.strip()
+        else periodo_activo_actual
+    )
     _, _, anio_cierre, mes_cierre = parse_periodo(periodo_a_cerrar)
     nombre_mes_cierre = f"{MESES_ES.get(mes_cierre, str(mes_cierre))} {anio_cierre}"
 
-    articulos_pendientes = (
-        db.query(ClienteArticulo)
-        .filter(
-            ClienteArticulo.cliente_id == cliente_id,
-            ClienteArticulo.estado == EstadoArticulo.PENDIENTE
-        )
-        .order_by(ClienteArticulo.fecha_creacion.asc())
-        .all()
+    query_arts = db.query(ClienteArticulo).filter(
+        ClienteArticulo.cliente_id == cliente_id,
+        ClienteArticulo.estado == EstadoArticulo.PENDIENTE,
     )
+    if periodo_a_cerrar == periodo_activo_actual:
+        query_arts = query_arts.filter(
+            or_(
+                ClienteArticulo.periodo == periodo_a_cerrar,
+                ClienteArticulo.periodo.is_(None),
+            )
+        )
+    else:
+        query_arts = query_arts.filter(ClienteArticulo.periodo == periodo_a_cerrar)
+
+    articulos_pendientes = query_arts.order_by(ClienteArticulo.fecha_creacion.asc()).all()
 
     ahora = ahora_argentina()
     total_liquidado = Decimal("0.00")
@@ -242,7 +253,7 @@ def cerrar_mes_cliente(
             tipo=TipoMovimiento.CARGO,
             monto=monto_item,
             saldo_resultante=nuevo_saldo,
-            nota=f"{producto.nombre} ({cant_str} {producto.unidad} liquidada al cierre de {nombre_mes_cierre} a ${precio_vigente:,.2f}){nota_extra}",
+            nota=f"{producto.nombre} ({cant_str} {producto.unidad} sumada al cierre de {nombre_mes_cierre} a ${precio_vigente:,.2f}){nota_extra}",
             periodo=periodo_a_cerrar,
             anulado=False,
             fecha_creacion=ahora
@@ -251,14 +262,39 @@ def cerrar_mes_cliente(
         db.flush()
 
         cliente.saldo_actual = nuevo_saldo
+        art.periodo = periodo_a_cerrar
         art.estado = EstadoArticulo.LIQUIDADO
         art.movimiento_id = mov.id
         art.precio_liquidado = precio_vigente
         art.fecha_liquidacion = ahora
         total_liquidado += monto_item
 
-    nuevo_periodo = calcular_siguiente_periodo(periodo_a_cerrar)
-    cliente.periodo_actual = nuevo_periodo
+    # Calcular el total propio de la ficha del mes cerrado (Compras del mes - Pagos del mes)
+    movs_mes = (
+        db.query(Movimiento)
+        .filter(
+            Movimiento.cliente_id == cliente.id,
+            Movimiento.periodo == periodo_a_cerrar,
+            Movimiento.anulado.is_(False),
+        )
+        .all()
+    )
+    cargos_mes = sum(
+        (m.monto for m in movs_mes if m.tipo == TipoMovimiento.CARGO),
+        Decimal("0.00"),
+    )
+    pagos_mes = sum(
+        (m.monto for m in movs_mes if m.tipo == TipoMovimiento.PAGO),
+        Decimal("0.00"),
+    )
+    saldo_ficha_mes = cargos_mes - pagos_mes
+
+    if periodo_a_cerrar >= periodo_activo_actual:
+        nuevo_periodo = calcular_siguiente_periodo(periodo_a_cerrar)
+        cliente.periodo_actual = nuevo_periodo
+    else:
+        nuevo_periodo = periodo_activo_actual
+
     cliente.ultima_actividad = ahora
 
     db.commit()
@@ -269,12 +305,12 @@ def cerrar_mes_cliente(
 
     return CerrarMesResponse(
         ok=True,
-        mensaje=f"Período {nombre_mes_cierre} cerrado. Los nuevos movimientos se anotarán en {nombre_mes_nuevo}.",
+        mensaje=f"Ficha {nombre_mes_cierre} cerrada con éxito. Período activo: {nombre_mes_nuevo}.",
         periodo_cerrado=periodo_a_cerrar,
         nuevo_periodo_activo=nuevo_periodo,
         articulos_liquidados_count=len(articulos_pendientes),
         total_articulos_liquidados=total_liquidado,
-        saldo_cierre=cliente.saldo_actual,
+        saldo_cierre=saldo_ficha_mes,
         cliente=_map_cliente_out(cliente)
     )
 

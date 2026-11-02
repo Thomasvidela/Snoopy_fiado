@@ -86,19 +86,10 @@ class ResumenService:
         _, _, anio, mes = parse_periodo(periodo)
         periodo_activo = obtener_periodo_activo_cliente(cliente)
 
-        # 1. Saldo anterior: último movimiento de un período ANTERIOR al consultado
-        ultimo_mov_anterior = (
-            db.query(Movimiento)
-            .filter(
-                Movimiento.cliente_id == cliente_id,
-                Movimiento.periodo < periodo
-            )
-            .order_by(Movimiento.periodo.desc(), Movimiento.fecha_creacion.desc(), Movimiento.id.desc())
-            .first()
-        )
-        saldo_anterior = ultimo_mov_anterior.saldo_resultante if ultimo_mov_anterior else Decimal("0.00")
+        # Cada ficha de mes tiene su propio total independiente (arranca en $0,00 cada mes)
+        saldo_anterior = Decimal("0.00")
 
-        # 2. Movimientos del período
+        # Movimientos exclusivos de la ficha del período consultado
         movimientos_db = (
             db.query(Movimiento)
             .filter(
@@ -109,9 +100,7 @@ class ResumenService:
             .all()
         )
 
-        # Calcular totales del período considerando anulaciones
-        # Cargos efectivos = CARGOs no anulados
-        # Pagos efectivos = PAGOs no anulados
+        # Calcular totales exclusivos de la ficha del período considerando anulaciones
         total_cargos = sum(
             (m.monto for m in movimientos_db if m.tipo == TipoMovimiento.CARGO and not m.anulado),
             Decimal("0.00")
@@ -121,10 +110,7 @@ class ResumenService:
             Decimal("0.00")
         )
 
-        if movimientos_db:
-            saldo_final = movimientos_db[-1].saldo_resultante
-        else:
-            saldo_final = saldo_anterior
+        saldo_final = total_cargos - total_pagos
 
         # Mapear movimientos a DTO Out
         movimientos_out: List[MovimientoOut] = []
@@ -165,19 +151,17 @@ class ResumenService:
                 nota_txt = f" - {m.nota}" if m.nota else ""
                 lineas_detalle.append(f"- {fecha_str}: -{formatear_pesos(m.monto)} (Pago recibido{nota_txt})")
 
-        # Artículos dinámicos pendientes de cotización (solo aplican al período actualmente abierto)
-        if periodo == periodo_activo:
-            articulos_pendientes_db = (
-                db.query(ClienteArticulo)
-                .filter(
-                    ClienteArticulo.cliente_id == cliente_id,
-                    ClienteArticulo.estado == EstadoArticulo.PENDIENTE
-                )
-                .order_by(ClienteArticulo.fecha_creacion.asc())
-                .all()
+        # Artículos dinámicos pendientes de cotización anotados en esta ficha de mes
+        articulos_pendientes_db = (
+            db.query(ClienteArticulo)
+            .filter(
+                ClienteArticulo.cliente_id == cliente_id,
+                ClienteArticulo.estado == EstadoArticulo.PENDIENTE,
+                ClienteArticulo.periodo == periodo
             )
-        else:
-            articulos_pendientes_db = []
+            .order_by(ClienteArticulo.fecha_creacion.asc())
+            .all()
+        )
 
         total_articulos = Decimal("0.00")
         lineas_articulos = []
@@ -196,6 +180,7 @@ class ResumenService:
                     cantidad=art.cantidad,
                     subtotal_actual=subtotal,
                     nota=art.nota,
+                    periodo=art.periodo or periodo,
                     estado=art.estado.value,
                     fecha_creacion=art.fecha_creacion,
                     usuario_nombre=art.operador.nombre if art.operador else None,
@@ -228,17 +213,16 @@ class ResumenService:
         texto_whatsapp = (
             f"*Despensa Snoopy*\n"
             f"*Cliente:* {cliente.nombre}{alias_texto}\n"
-            f"*Período:* {nombre_mes} {anio}\n\n"
-            f"*Estado de Cuenta:*\n"
-            f"- Saldo anterior: {formatear_pesos(saldo_anterior)}\n"
+            f"*Ficha del Mes:* {nombre_mes} {anio}\n\n"
+            f"*Resumen del Período:*\n"
             f"- (+) Compras del mes: {formatear_pesos(total_cargos)}\n"
-            f"- (-) Pagos/Entregas: {formatear_pesos(total_pagos)}\n"
-            f"- Saldo cuenta en pesos: {formatear_pesos(saldo_final)}\n"
+            f"- (-) Pagos/Entregas del mes: {formatear_pesos(total_pagos)}\n"
+            f"- Saldo en libreta ({nombre_mes}): {formatear_pesos(saldo_final)}\n"
             f"{bloque_articulos_txt}"
             f"--------------------------------\n"
-            f"*TOTAL FINAL A PAGAR: {formatear_pesos(saldo_total_con_articulos)}*\n"
+            f"*TOTAL DEL MES ({nombre_mes}): {formatear_pesos(saldo_total_con_articulos)}*\n"
             f"--------------------------------\n\n"
-            f"*Detalle de movimientos en cuenta:*\n"
+            f"*Detalle de movimientos del mes:*\n"
             f"{bloque_detalle}\n\n"
             f"¡Muchas gracias por su compra!"
         )

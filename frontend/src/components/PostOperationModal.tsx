@@ -93,6 +93,15 @@ export const PostOperationModal: React.FC<PostOperationModalProps> = ({
               {formatCurrency(saldoMostrado)}
             </span>
           </div>
+
+          {(cliente.envases_pendientes_count || 0) > 0 && (
+            <div className="flex items-center justify-between gap-2 pt-1">
+              <span className="text-xs text-slate-400">Envases prestados:</span>
+              <span className="text-xs font-bold text-cyan-300">
+                🍾 Debe {cliente.envases_pendientes_count} envase(s)
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Core Question */}

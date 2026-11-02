@@ -1,5 +1,5 @@
 import React from 'react';
-import { Store, UserCheck, RefreshCw, UserPlus, Users, Package } from 'lucide-react';
+import { Store, UserCheck, RefreshCw, UserPlus, Users, Package, BarChart3 } from 'lucide-react';
 import { Operador } from '../types';
 
 interface NavbarProps {
@@ -7,6 +7,7 @@ interface NavbarProps {
   onSwitchOperator: () => void;
   onManageOperators: () => void;
   onManageProducts: () => void;
+  onOpenDailySummary: () => void;
   onNewClient: () => void;
 }
 
@@ -15,6 +16,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onSwitchOperator,
   onManageOperators,
   onManageProducts,
+  onOpenDailySummary,
   onNewClient,
 }) => {
   return (
@@ -40,6 +42,16 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Actions & Operator */}
         <div className="flex items-center gap-2 sm:gap-3">
+          {/* Daily Summary & Containers Button */}
+          <button
+            onClick={onOpenDailySummary}
+            title="Ver Resumen Diario y Envases Prestados en la Calle"
+            className="flex items-center gap-1.5 px-2.5 py-2 rounded-lg bg-slate-700/80 hover:bg-slate-700 border border-slate-600/70 text-slate-300 hover:text-white transition active:scale-95 text-xs font-medium"
+          >
+            <BarChart3 className="w-4 h-4 text-cyan-400" />
+            <span className="hidden md:inline">Resumen Hoy</span>
+          </button>
+
           {/* Manage Products Button */}
           <button
             onClick={onManageProducts}

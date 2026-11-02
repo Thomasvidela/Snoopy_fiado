@@ -11,9 +11,12 @@ import {
   MovimientoUpdatePayload,
   Operador,
   OperadorCreatePayload,
+  PrestamoEnvase,
+  PrestamoEnvaseCreatePayload,
   Producto,
   ProductoCreatePayload,
   ProductoUpdatePayload,
+  ResumenDiario,
   ResumenMensual,
 } from '../types';
 
@@ -265,4 +268,29 @@ export const api = {
     apiRequest<{ ok: boolean; mensaje: string }>(`/articulos/${articuloId}`, {
       method: 'DELETE',
     }),
+
+  // Préstamo de Envases Retornables (Garrafas, Cerveza, Gaseosa)
+  getClienteEnvases: (clienteId: number, soloPendientes: boolean = false) =>
+    apiRequest<PrestamoEnvase[]>(
+      `/clientes/${clienteId}/envases${soloPendientes ? '?solo_pendientes=true' : '?solo_pendientes=false'}`
+    ),
+  createClienteEnvase: (clienteId: number, payload: PrestamoEnvaseCreatePayload) =>
+    apiRequest<PrestamoEnvase>(`/clientes/${clienteId}/envases`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  devolverClienteEnvase: (envaseId: number, cantidadDevuelta?: number) =>
+    apiRequest<PrestamoEnvase>(`/envases/${envaseId}/devolver`, {
+      method: 'POST',
+      body: JSON.stringify(
+        cantidadDevuelta !== undefined ? { cantidad_devuelta: cantidadDevuelta } : {}
+      ),
+    }),
+  deleteClienteEnvase: (envaseId: number) =>
+    apiRequest<{ ok: boolean; mensaje: string }>(`/envases/${envaseId}`, {
+      method: 'DELETE',
+    }),
+
+  // Resumen Diario y Cierre Automático
+  getResumenDiario: () => apiRequest<ResumenDiario>('/reportes/resumen-diario'),
 };

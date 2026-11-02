@@ -20,6 +20,8 @@ export interface Cliente {
   total_articulos_pendientes?: string;
   articulos_pendientes_count?: number;
   saldo_total?: string;
+  envases_pendientes_count?: number;
+  envases_pendientes_resumen?: string[];
 }
 
 export interface ListadoClientesResponse {
@@ -105,7 +107,58 @@ export interface ResumenMensual {
   articulos_pendientes?: ClienteArticulo[];
   total_articulos_pendientes?: string;
   saldo_total_con_articulos?: string;
+  envases_pendientes?: PrestamoEnvase[];
   texto_whatsapp: string;
+}
+
+export interface PrestamoEnvase {
+  id: number;
+  cliente_id: number;
+  cliente_nombre?: string | null;
+  usuario_id: number;
+  operador_nombre?: string | null;
+  descripcion: string;
+  cantidad: number;
+  cantidad_devuelta: number;
+  cantidad_pendiente: number;
+  nota?: string | null;
+  estado: 'PRESTADO' | 'DEVUELTO';
+  fecha_prestamo: string;
+  fecha_devolucion?: string | null;
+  devuelto_por_nombre?: string | null;
+}
+
+export interface PrestamoEnvaseCreatePayload {
+  descripcion: string;
+  cantidad: number;
+  nota?: string;
+}
+
+export interface CierreAutomaticoInfo {
+  ejecutado: boolean;
+  periodo_activo_actual: string;
+  ultimo_cierre_timestamp?: string | null;
+  clientes_avanzados_count: number;
+  articulos_liquidados_count: number;
+  total_articulos_liquidados: string;
+}
+
+export interface ResumenDiario {
+  fecha: string;
+  periodo_actual: string;
+  fiado_hoy: string;
+  cantidad_cargos_hoy: number;
+  cobrado_hoy: string;
+  cantidad_pagos_hoy: number;
+  total_en_calle: string;
+  clientes_con_deuda: number;
+  total_articulos_pendientes_valor: string;
+  articulos_pendientes_unidades: number;
+  envases_prestados_pendientes: number;
+  clientes_con_envases: number;
+  ultimos_movimientos_hoy: Movimiento[];
+  envases_en_calle_detalle: PrestamoEnvase[];
+  cierre_automatico: CierreAutomaticoInfo;
 }
 
 export interface LoginResponse {

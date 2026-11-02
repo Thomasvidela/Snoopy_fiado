@@ -18,14 +18,17 @@ import {
   Search,
   X,
   Calculator,
+  RefreshCcw,
+  Trash2,
 } from 'lucide-react';
-import { Cliente, Movimiento, ClienteArticulo, MovimientoUpdatePayload } from '../types';
+import { Cliente, Movimiento, ClienteArticulo, PrestamoEnvase, MovimientoUpdatePayload } from '../types';
 import { MovementList, getPeriodoLabel } from './MovementList';
 import { EditClientModal } from './EditClientModal';
 import { AddArticleModal } from './AddArticleModal';
+import { LoanContainerModal } from './LoanContainerModal';
 import { CloseAccountModal } from './CloseAccountModal';
 import { PostOperationInfo } from './PostOperationModal';
-import { formatCurrency, normalizeArgentinePhone, getWhatsAppCleanNumber } from '../utils/format';
+import { formatCurrency, formatDate, normalizeArgentinePhone, getWhatsAppCleanNumber } from '../utils/format';
 import { hapticTap, hapticSuccess, hapticError } from '../utils/haptics';
 import { api } from '../api/client';
 
@@ -80,9 +83,13 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
   const [menuOpen, setMenuOpen] = useState<boolean>(false);
   const [editModalOpen, setEditModalOpen] = useState<boolean>(false);
   const [addArticleModalOpen, setAddArticleModalOpen] = useState<boolean>(false);
+  const [loanContainerModalOpen, setLoanContainerModalOpen] = useState<boolean>(false);
   const [closeAccountModalOpen, setCloseAccountModalOpen] = useState<boolean>(false);
   const [articulos, setArticulos] = useState<ClienteArticulo[]>([]);
+  const [envases, setEnvases] = useState<PrestamoEnvase[]>([]);
   const [mostrarHistorialArticulos, setMostrarHistorialArticulos] = useState<boolean>(false);
+  const [mostrarHistorialEnvases, setMostrarHistorialEnvases] = useState<boolean>(false);
+  const [devolviendoEnvaseId, setDevolviendoEnvaseId] = useState<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const currentYearMonth = useMemo(() => {
@@ -150,14 +157,18 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
     }
   };
 
-  // Cargar articulos dinamicos del cliente
+  // Cargar articulos dinamicos y envases retornables del cliente
   const cargarArticulos = useCallback(async () => {
     if (!cliente) return;
     try {
-      const data = await api.getClienteArticulos(cliente.id, false);
-      setArticulos(data);
+      const [dataArts, dataEnv] = await Promise.all([
+        api.getClienteArticulos(cliente.id, false),
+        api.getClienteEnvases(cliente.id, false),
+      ]);
+      setArticulos(dataArts);
+      setEnvases(dataEnv);
     } catch (err) {
-      console.error('Error al cargar artículos del cliente:', err);
+      console.error('Error al cargar artículos o envases del cliente:', err);
     }
   }, [cliente?.id]);
 
@@ -166,6 +177,7 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
       cargarArticulos();
     } else {
       setArticulos([]);
+      setEnvases([]);
     }
   }, [cliente?.id, cargarArticulos]);
 
@@ -257,6 +269,47 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
 
   const articulosPendientes = articulos.filter((a) => a.estado === 'PENDIENTE');
   const articulosHistorial = articulos.filter((a) => a.estado !== 'PENDIENTE');
+
+  const envasesPendientes = envases.filter((e) => e.estado === 'PRESTADO' && e.cantidad_pendiente > 0);
+  const envasesHistorial = envases.filter((e) => e.estado === 'DEVUELTO');
+  const totalEnvasesPendientesUnidades = envasesPendientes.reduce(
+    (acc, e) => acc + e.cantidad_pendiente,
+    0
+  );
+
+  const handleDevolverEnvase = async (envaseId: number, cantidadADevolver?: number) => {
+    setDevolviendoEnvaseId(envaseId);
+    try {
+      await api.devolverClienteEnvase(envaseId, cantidadADevolver);
+      hapticSuccess();
+      await cargarArticulos();
+      if (onRefreshClient) await onRefreshClient();
+    } catch (err: any) {
+      hapticError();
+      alert(err.message || 'Error al registrar devolución de envase');
+    } finally {
+      setDevolviendoEnvaseId(null);
+    }
+  };
+
+  const handleEliminarEnvasePorError = async (envase: PrestamoEnvase) => {
+    if (
+      !window.confirm(
+        `¿Borrar el registro de "${envase.cantidad}x ${envase.descripcion}" anotado por error?`
+      )
+    ) {
+      return;
+    }
+    try {
+      await api.deleteClienteEnvase(envase.id);
+      hapticSuccess();
+      await cargarArticulos();
+      if (onRefreshClient) await onRefreshClient();
+    } catch (err: any) {
+      hapticError();
+      alert(err.message || 'Error al eliminar registro de envase');
+    }
+  };
 
   // Artículos pendientes que pertenecen a la ficha actualmente seleccionada
   const articulosPendientesFicha = articulosPendientes.filter((a) => {
@@ -548,7 +601,7 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
         )}
 
         {/* Action Buttons: Operan directamente sobre la Ficha del Mes Seleccionada */}
-        <div className="grid grid-cols-3 gap-2 mt-3.5">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3.5">
           <button
             onClick={() =>
               onOpenMovementModal('CARGO', selectedPeriodo, saldoFichaSeleccionada)
@@ -593,6 +646,27 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
           </button>
 
           <button
+            onClick={() => {
+              hapticTap(15);
+              setLoanContainerModalOpen(true);
+            }}
+            disabled={!cliente.activo}
+            title={
+              !cliente.activo
+                ? 'Cliente inhabilitado'
+                : 'Prestar envase retornable vacío (Garrafa, Cerveza 1L, Gaseosa, Bidón)'
+            }
+            className={`py-3 px-2 rounded-xl font-bold text-xs sm:text-sm shadow-md transition flex items-center justify-center gap-1.5 ${
+              cliente.activo
+                ? 'bg-cyan-600 hover:bg-cyan-500 active:scale-95 text-white shadow-cyan-950/40'
+                : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed opacity-60'
+            }`}
+          >
+            <RefreshCcw className="w-4 h-4 shrink-0 text-cyan-200" />
+            <span className="truncate">+ Envase</span>
+          </button>
+
+          <button
             onClick={() =>
               onOpenMovementModal('PAGO', selectedPeriodo, saldoFichaSeleccionada)
             }
@@ -615,6 +689,138 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Envases Retornables Prestados al Cliente (Garrafa, Cerveza, Gaseosa) */}
+      {(envasesPendientes.length > 0 || envasesHistorial.length > 0) && (
+        <div className="px-3 sm:px-5 pt-3 space-y-2">
+          {envasesPendientes.length > 0 && (
+            <div className="p-3.5 rounded-2xl bg-cyan-950/25 border border-cyan-500/40 shadow-sm space-y-2.5">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-cyan-500/20 text-cyan-300 flex items-center justify-center shrink-0 text-sm">
+                    🍾
+                  </div>
+                  <div>
+                    <h4 className="text-xs sm:text-sm font-extrabold text-cyan-200">
+                      Debe {totalEnvasesPendientesUnidades} Envase(s) Retornable(s)
+                    </h4>
+                    <p className="text-[11px] text-slate-400">
+                      Cuando el cliente traiga el envase vacío al mostrador, tocá{' '}
+                      <strong className="text-emerald-300">Devolvió</strong>.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                {envasesPendientes.map((env) => (
+                  <div
+                    key={env.id}
+                    className="bg-slate-900/90 border border-slate-700/80 rounded-xl px-3 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-white text-sm">
+                          {env.cantidad_pendiente}x {env.descripcion}
+                        </span>
+                        {env.cantidad_devuelta > 0 && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-semibold">
+                            Llevó {env.cantidad} • Ya devolvió {env.cantidad_devuelta}
+                          </span>
+                        )}
+                      </div>
+                      {env.nota && (
+                        <p className="text-[11px] text-slate-300 mt-0.5">Nota: {env.nota}</p>
+                      )}
+                      <span className="text-[10px] text-slate-400 block mt-0.5">
+                        Prestado el {formatDate(env.fecha_prestamo)}
+                        {env.operador_nombre ? ` por ${env.operador_nombre}` : ''}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 self-end sm:self-center shrink-0">
+                      {env.cantidad_pendiente > 1 && (
+                        <button
+                          type="button"
+                          disabled={devolviendoEnvaseId === env.id}
+                          onClick={() => handleDevolverEnvase(env.id, 1)}
+                          className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 text-xs font-bold transition active:scale-95 disabled:opacity-50"
+                          title="Registrar que devolvió 1 unidad y queda debiendo el resto"
+                        >
+                          Devolvió 1
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        disabled={devolviendoEnvaseId === env.id}
+                        onClick={() => handleDevolverEnvase(env.id)}
+                        className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1 shadow-sm transition active:scale-95 disabled:opacity-50"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>
+                          {env.cantidad_pendiente > 1
+                            ? `Devolvió todos (${env.cantidad_pendiente})`
+                            : 'Devolvió envase'}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleEliminarEnvasePorError(env)}
+                        title="Borrar préstamo anotado por error"
+                        className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 border border-slate-700 transition"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {envasesHistorial.length > 0 && (
+            <div>
+              <button
+                onClick={() => setMostrarHistorialEnvases(!mostrarHistorialEnvases)}
+                className="text-xs text-slate-400 hover:text-slate-300 flex items-center gap-1 transition font-medium"
+              >
+                {mostrarHistorialEnvases ? (
+                  <ChevronUp className="w-3.5 h-3.5" />
+                ) : (
+                  <ChevronDown className="w-3.5 h-3.5" />
+                )}
+                <span>
+                  {mostrarHistorialEnvases ? 'Ocultar' : 'Ver'} historial de envases ya devueltos (
+                  {envasesHistorial.length})
+                </span>
+              </button>
+
+              {mostrarHistorialEnvases && (
+                <div className="mt-2 space-y-1.5">
+                  {envasesHistorial.map((env) => (
+                    <div
+                      key={env.id}
+                      className="bg-slate-850/60 rounded-lg p-2.5 border border-slate-800 text-xs flex items-center justify-between text-slate-400"
+                    >
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-medium text-slate-300">
+                          {env.cantidad}x {env.descripcion}
+                        </span>
+                        <span className="px-1.5 py-0.2 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                          Devuelto
+                        </span>
+                      </div>
+                      <div className="text-right text-[11px]">
+                        {env.fecha_devolucion ? formatDate(env.fecha_devolucion) : '-'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* History of Closed/Returned Products */}
       {articulosHistorial.length > 0 && (
@@ -744,6 +950,25 @@ export const ClientDetail: React.FC<ClientDetailProps> = ({
               detalle: `${art.cantidad} ${art.producto_unidad} de ${art.producto_nombre} en ficha ${labelFichaSeleccionada} (se suma al cerrar el mes)`,
               monto: art.subtotal_actual,
               esCargo: true,
+            });
+          }
+        }}
+      />
+
+      {/* Modal para anotar préstamo de Envases Retornables (Garrafa, Cerveza, Gaseosa) */}
+      <LoanContainerModal
+        isOpen={loanContainerModalOpen}
+        cliente={cliente}
+        onClose={() => setLoanContainerModalOpen(false)}
+        onSuccess={async (prestamo) => {
+          await cargarArticulos();
+          if (onRefreshClient) await onRefreshClient();
+          if (onOperationFinished) {
+            onOperationFinished({
+              titulo: '¡Envase prestado registrado!',
+              detalle: `${prestamo.cantidad}x ${prestamo.descripcion}${
+                prestamo.nota ? ` (${prestamo.nota})` : ''
+              }`,
             });
           }
         }}

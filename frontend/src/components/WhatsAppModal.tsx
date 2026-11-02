@@ -233,6 +233,16 @@ export const WhatsAppModal: React.FC<WhatsAppModalProps> = ({
               </div>
             )}
 
+            {resumen.envases_pendientes && resumen.envases_pendientes.length > 0 && (
+              <div className="bg-cyan-500/10 border border-cyan-500/30 rounded-xl p-2.5 text-xs text-cyan-300 flex items-center justify-between">
+                <span>
+                  🍾 Incluye recordatorio de{' '}
+                  {resumen.envases_pendientes.reduce((acc, e) => acc + e.cantidad_pendiente, 0)}{' '}
+                  envase(s) prestado(s) sin devolver
+                </span>
+              </div>
+            )}
+
             {/* Formatted Message Preview */}
             <div>
               <label className="text-[11px] font-semibold text-slate-400 block mb-1">

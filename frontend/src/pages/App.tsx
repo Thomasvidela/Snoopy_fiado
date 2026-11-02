@@ -9,6 +9,7 @@ import { WhatsAppModal } from '../components/WhatsAppModal';
 import { NewClientModal } from '../components/NewClientModal';
 import { ManageOperatorsModal } from '../components/ManageOperatorsModal';
 import { ManageProductsModal } from '../components/ManageProductsModal';
+import { DailySummaryModal } from '../components/DailySummaryModal';
 import { StoreGateModal } from '../components/StoreGateModal';
 import { PostOperationModal, PostOperationInfo } from '../components/PostOperationModal';
 import { Cliente, Movimiento, MovimientoCreatePayload, MovimientoUpdatePayload, Operador } from '../types';
@@ -41,6 +42,7 @@ export const App: React.FC = () => {
   const [newClientModalOpen, setNewClientModalOpen] = useState<boolean>(false);
   const [manageOperatorsOpen, setManageOperatorsOpen] = useState<boolean>(false);
   const [manageProductsOpen, setManageProductsOpen] = useState<boolean>(false);
+  const [dailySummaryOpen, setDailySummaryOpen] = useState<boolean>(false);
   const [postOpInfo, setPostOpInfo] = useState<PostOperationInfo | null>(null);
 
   // Mobile view state: 'list' or 'detail'
@@ -244,6 +246,7 @@ export const App: React.FC = () => {
         onSwitchOperator={() => setPinModalOpen(true)}
         onManageOperators={() => setManageOperatorsOpen(true)}
         onManageProducts={() => setManageProductsOpen(true)}
+        onOpenDailySummary={() => setDailySummaryOpen(true)}
         onNewClient={() => setNewClientModalOpen(true)}
       />
 
@@ -395,6 +398,26 @@ export const App: React.FC = () => {
         isOpen={manageProductsOpen}
         onClose={() => setManageProductsOpen(false)}
         onProductsUpdated={handleRefreshSelectedCliente}
+      />
+
+      {/* Daily Summary & Containers Modal */}
+      <DailySummaryModal
+        isOpen={dailySummaryOpen}
+        onClose={() => setDailySummaryOpen(false)}
+        onRefreshClients={handleRefreshSelectedCliente}
+        onSelectClienteById={async (clienteId) => {
+          const found = clientes.find((c) => c.id === clienteId);
+          if (found) {
+            handleSelectCliente(found);
+          } else {
+            try {
+              const cli = await api.getCliente(clienteId);
+              handleSelectCliente(cli);
+            } catch {
+              // ignore
+            }
+          }
+        }}
       />
 
       {/* Store Gatekeeper Modal (Clave Maestra del Comercio) */}

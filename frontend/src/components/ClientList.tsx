@@ -21,7 +21,7 @@ export const ClientList: React.FC<ClientListProps> = ({
   onSearchChange,
   searchQuery,
 }) => {
-  const [filter, setFilter] = useState<'todos' | 'deudores' | 'aldia' | 'inactivos'>('todos');
+  const [filter, setFilter] = useState<'todos' | 'deudores' | 'envases' | 'aldia' | 'inactivos'>('todos');
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Cuando se deselecciona el cliente (ej. al terminar operación), enfocar automáticamente el buscador
@@ -37,10 +37,15 @@ export const ClientList: React.FC<ClientListProps> = ({
     return clientes.filter((c) => !c.activo).length;
   }, [clientes]);
 
-  // Filtrado local adicional (por estado de saldo o inactivos)
+  const conEnvasesCount = useMemo(() => {
+    return clientes.filter((c) => c.activo && (c.envases_pendientes_count || 0) > 0).length;
+  }, [clientes]);
+
+  // Filtrado local adicional (por estado de saldo, envases o inactivos)
   const filteredClientes = useMemo(() => {
     return clientes.filter((c) => {
       if (filter === 'inactivos') return !c.activo;
+      if (filter === 'envases') return c.activo && (c.envases_pendientes_count || 0) > 0;
       const saldo = parseFloat(c.saldo_total || c.saldo_actual);
       if (filter === 'deudores') return saldo > 0 && c.activo;
       if (filter === 'aldia') return saldo <= 0 && c.activo;
@@ -113,6 +118,18 @@ export const ClientList: React.FC<ClientListProps> = ({
             >
               Con Deuda
             </button>
+            {conEnvasesCount > 0 && (
+              <button
+                onClick={() => setFilter('envases')}
+                className={`px-2 py-1 rounded-md transition font-medium ${
+                  filter === 'envases'
+                    ? 'bg-cyan-600 text-white shadow-xs'
+                    : 'text-cyan-400 hover:text-cyan-200'
+                }`}
+              >
+                🍾 Envases ({conEnvasesCount})
+              </button>
+            )}
             <button
               onClick={() => setFilter('aldia')}
               className={`px-2 py-1 rounded-md transition font-medium ${
@@ -163,6 +180,7 @@ export const ClientList: React.FC<ClientListProps> = ({
             const hasDebt = saldoNum > 0;
             const isCredit = saldoNum < 0;
             const articulosCount = cliente.articulos_pendientes_count || 0;
+            const envasesCount = cliente.envases_pendientes_count || 0;
 
             return (
               <button
@@ -238,7 +256,18 @@ export const ClientList: React.FC<ClientListProps> = ({
                   >
                     {formatCurrency(displaySaldo)}
                   </div>
-                  <div className="flex items-center justify-end gap-1 mt-0.5">
+                  <div className="flex items-center justify-end gap-1 mt-0.5 flex-wrap">
+                    {envasesCount > 0 && (
+                      <span
+                        title={
+                          cliente.envases_pendientes_resumen?.join(', ') ||
+                          `${envasesCount} envase(s) prestado(s)`
+                        }
+                        className="text-[10px] font-semibold px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 shrink-0"
+                      >
+                        🍾 {envasesCount} env.
+                      </span>
+                    )}
                     {articulosCount > 0 && (
                       <span
                         title={`${articulosCount} producto(s) a cotización de hoy`}
